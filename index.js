@@ -76,7 +76,7 @@ async function appendCommandLog(entry) {
 }
 
 /**
- * Create a test return label via Shippo using dummy shipment data.
+ * Create a return label via Shippo using the provided shipment data.
  * Returns { trackingNumber, labelUrl, trackingUrl } on success.
  *
  * Uses Shippo's "create shipment -> buy label" flow:
@@ -84,7 +84,7 @@ async function appendCommandLog(entry) {
  *  2) Take first rate
  *  3) POST /transactions
  */
-async function createTestReturnLabelWithShippo(logger) {
+async function createReturnLabelWithShippo(shipmentBody, logger) {
   const log = logger || console;
 
   const headers = {
@@ -92,42 +92,7 @@ async function createTestReturnLabelWithShippo(logger) {
     'Content-Type': 'application/json'
   };
 
-  // 1) Create a Shipment with dummy data (both addresses in US, 1 small parcel)
-  const shipmentBody = {
-    address_from: {
-      name: 'Carismo Returns (TEST)',
-      company: 'Carismo Design',
-      street1: '215 Clayton St.',
-      city: 'San Francisco',
-      state: 'CA',
-      zip: '94117',
-      country: 'US',
-      phone: '+1 555 555 5555',
-      email: 'test-sender@example.com'
-    },
-    address_to: {
-      name: 'Test Customer',
-      street1: '965 Mission St',
-      city: 'San Francisco',
-      state: 'CA',
-      zip: '94103',
-      country: 'US',
-      phone: '+1 555 111 2222',
-      email: 'test-recipient@example.com'
-    },
-    parcels: [
-      {
-        length: '10',
-        width: '8',
-        height: '4',
-        distance_unit: 'in',
-        weight: '2',
-        mass_unit: 'lb'
-      }
-    ],
-    async: false
-  };
-
+  // 1) Create a Shipment with the provided data
   let shipment;
   try {
     const shipmentRes = await fetch('https://api.goshippo.com/shipments/', {
@@ -149,7 +114,7 @@ async function createTestReturnLabelWithShippo(logger) {
 
   const rates = shipment?.rates;
   if (!Array.isArray(rates) || rates.length === 0) {
-    throw new Error('Shippo returned no rates for test shipment.');
+    throw new Error('Shippo returned no rates for shipment.');
   }
 
   const chosenRate = rates[0];
@@ -265,8 +230,7 @@ slackApp.command('/shippinglabel', async ({ ack, body, client, logger }) => {
  * Now:
  *  - Acks promptly
  *  - Logs command usage into ./data/commands-log.json
- *  - Creates a Shippo test label with dummy data
- *  - Uploads the label PDF + tracking info into Slack
+ *  - Opens an "Edit Details" modal with test defaults
  */
 slackApp.command('/returnlabel', async ({ ack, body, client, logger }) => {
   await ack();
@@ -290,17 +254,448 @@ slackApp.command('/returnlabel', async ({ ack, body, client, logger }) => {
     logger?.warn?.('Failed to log /returnlabel command:', e);
   }
 
+  const privateMetadata = JSON.stringify({
+    channelId: targetChannel
+  });
+
+  try {
+    await client.views.open({
+      trigger_id: body.trigger_id,
+      view: {
+        type: 'modal',
+        callback_id: 'returnlabel_edit_modal',
+        private_metadata: privateMetadata,
+        title: {
+          type: 'plain_text',
+          text: 'Return Label – Edit',
+          emoji: true
+        },
+        submit: {
+          type: 'plain_text',
+          text: 'Next',
+          emoji: true
+        },
+        close: {
+          type: 'plain_text',
+          text: 'Cancel',
+          emoji: true
+        },
+        blocks: [
+          {
+            type: 'section',
+            text: {
+              type: 'mrkdwn',
+              text: 'Edit the return label details, then click *Next* to review before creating the label.'
+            }
+          },
+          {
+            type: 'divider'
+          },
+          {
+            type: 'input',
+            block_id: 'from_name_block',
+            label: {
+              type: 'plain_text',
+              text: 'From Name',
+              emoji: true
+            },
+            element: {
+              type: 'plain_text_input',
+              action_id: 'from_name',
+              initial_value: 'Carismo Returns (TEST)'
+            }
+          },
+          {
+            type: 'input',
+            block_id: 'from_company_block',
+            label: {
+              type: 'plain_text',
+              text: 'From Company',
+              emoji: true
+            },
+            element: {
+              type: 'plain_text_input',
+              action_id: 'from_company',
+              initial_value: 'Carismo Design'
+            }
+          },
+          {
+            type: 'input',
+            block_id: 'from_street1_block',
+            label: {
+              type: 'plain_text',
+              text: 'From Street',
+              emoji: true
+            },
+            element: {
+              type: 'plain_text_input',
+              action_id: 'from_street1',
+              initial_value: '215 Clayton St.'
+            }
+          },
+          {
+            type: 'input',
+            block_id: 'from_city_block',
+            label: {
+              type: 'plain_text',
+              text: 'From City',
+              emoji: true
+            },
+            element: {
+              type: 'plain_text_input',
+              action_id: 'from_city',
+              initial_value: 'San Francisco'
+            }
+          },
+          {
+            type: 'input',
+            block_id: 'from_state_block',
+            label: {
+              type: 'plain_text',
+              text: 'From State (2-letter)',
+              emoji: true
+            },
+            element: {
+              type: 'plain_text_input',
+              action_id: 'from_state',
+              initial_value: 'CA'
+            }
+          },
+          {
+            type: 'input',
+            block_id: 'from_zip_block',
+            label: {
+              type: 'plain_text',
+              text: 'From ZIP',
+              emoji: true
+            },
+            element: {
+              type: 'plain_text_input',
+              action_id: 'from_zip',
+              initial_value: '94117'
+            }
+          },
+          {
+            type: 'input',
+            block_id: 'to_name_block',
+            label: {
+              type: 'plain_text',
+              text: 'To Name',
+              emoji: true
+            },
+            element: {
+              type: 'plain_text_input',
+              action_id: 'to_name',
+              initial_value: 'Test Customer'
+            }
+          },
+          {
+            type: 'input',
+            block_id: 'to_street1_block',
+            label: {
+              type: 'plain_text',
+              text: 'To Street',
+              emoji: true
+            },
+            element: {
+              type: 'plain_text_input',
+              action_id: 'to_street1',
+              initial_value: '965 Mission St'
+            }
+          },
+          {
+            type: 'input',
+            block_id: 'to_city_block',
+            label: {
+              type: 'plain_text',
+              text: 'To City',
+              emoji: true
+            },
+            element: {
+              type: 'plain_text_input',
+              action_id: 'to_city',
+              initial_value: 'San Francisco'
+            }
+          },
+          {
+            type: 'input',
+            block_id: 'to_state_block',
+            label: {
+              type: 'plain_text',
+              text: 'To State (2-letter)',
+              emoji: true
+            },
+            element: {
+              type: 'plain_text_input',
+              action_id: 'to_state',
+              initial_value: 'CA'
+            }
+          },
+          {
+            type: 'input',
+            block_id: 'to_zip_block',
+            label: {
+              type: 'plain_text',
+              text: 'To ZIP',
+              emoji: true
+            },
+            element: {
+              type: 'plain_text_input',
+              action_id: 'to_zip',
+              initial_value: '94103'
+            }
+          },
+          {
+            type: 'divider'
+          },
+          {
+            type: 'input',
+            block_id: 'parcel_length_block',
+            label: {
+              type: 'plain_text',
+              text: 'Parcel Length (in)',
+              emoji: true
+            },
+            element: {
+              type: 'plain_text_input',
+              action_id: 'parcel_length',
+              initial_value: '10'
+            }
+          },
+          {
+            type: 'input',
+            block_id: 'parcel_width_block',
+            label: {
+              type: 'plain_text',
+              text: 'Parcel Width (in)',
+              emoji: true
+            },
+            element: {
+              type: 'plain_text_input',
+              action_id: 'parcel_width',
+              initial_value: '8'
+            }
+          },
+          {
+            type: 'input',
+            block_id: 'parcel_height_block',
+            label: {
+              type: 'plain_text',
+              text: 'Parcel Height (in)',
+              emoji: true
+            },
+            element: {
+              type: 'plain_text_input',
+              action_id: 'parcel_height',
+              initial_value: '4'
+            }
+          },
+          {
+            type: 'input',
+            block_id: 'parcel_weight_block',
+            label: {
+              type: 'plain_text',
+              text: 'Parcel Weight (lb)',
+              emoji: true
+            },
+            element: {
+              type: 'plain_text_input',
+              action_id: 'parcel_weight',
+              initial_value: '2'
+            }
+          }
+        ]
+      }
+    });
+  } catch (e) {
+    console.error('Failed to open /returnlabel edit modal:', e?.stack || e?.message || e);
+  }
+});
+
+/**
+ * View submission handler for the "Edit Details" modal.
+ * Builds a shipment object and updates the modal into a "Review" modal.
+ */
+slackApp.view('returnlabel_edit_modal', async ({ ack, body, view, client, logger }) => {
+  await ack();
+
+  const log = logger || console;
+
+  // Recover metadata (channelId)
+  let channelId = null;
+  try {
+    const meta = view.private_metadata ? JSON.parse(view.private_metadata) : {};
+    channelId = meta.channelId || null;
+  } catch (e) {
+    log.error?.('Failed to parse private_metadata in edit modal:', e?.stack || e?.message || e);
+  }
+
+  // Extract values from the modal
+  const values = view.state.values;
+
+  function getVal(blockId, actionId) {
+    return values[blockId]?.[actionId]?.value?.trim() || '';
+  }
+
+  const fromName = getVal('from_name_block', 'from_name');
+  const fromCompany = getVal('from_company_block', 'from_company');
+  const fromStreet1 = getVal('from_street1_block', 'from_street1');
+  const fromCity = getVal('from_city_block', 'from_city');
+  const fromState = getVal('from_state_block', 'from_state');
+  const fromZip = getVal('from_zip_block', 'from_zip');
+
+  const toName = getVal('to_name_block', 'to_name');
+  const toStreet1 = getVal('to_street1_block', 'to_street1');
+  const toCity = getVal('to_city_block', 'to_city');
+  const toState = getVal('to_state_block', 'to_state');
+  const toZip = getVal('to_zip_block', 'to_zip');
+
+  const parcelLength = getVal('parcel_length_block', 'parcel_length');
+  const parcelWidth = getVal('parcel_width_block', 'parcel_width');
+  const parcelHeight = getVal('parcel_height_block', 'parcel_height');
+  const parcelWeight = getVal('parcel_weight_block', 'parcel_weight');
+
+  const shipment = {
+    address_from: {
+      name: fromName || 'Carismo Returns (TEST)',
+      company: fromCompany || 'Carismo Design',
+      street1: fromStreet1 || '215 Clayton St.',
+      city: fromCity || 'San Francisco',
+      state: fromState || 'CA',
+      zip: fromZip || '94117',
+      country: 'US',
+      phone: '+1 555 555 5555',
+      email: 'test-sender@example.com'
+    },
+    address_to: {
+      name: toName || 'Test Customer',
+      street1: toStreet1 || '965 Mission St',
+      city: toCity || 'San Francisco',
+      state: toState || 'CA',
+      zip: toZip || '94103',
+      country: 'US',
+      phone: '+1 555 111 2222',
+      email: 'test-recipient@example.com'
+    },
+    parcels: [
+      {
+        length: parcelLength || '10',
+        width: parcelWidth || '8',
+        height: parcelHeight || '4',
+        distance_unit: 'in',
+        weight: parcelWeight || '2',
+        mass_unit: 'lb'
+      }
+    ],
+    async: false
+  };
+
+  const reviewMetadata = JSON.stringify({
+    channelId,
+    shipment
+  });
+
+  const reviewTextLines = [
+    '*From:*',
+    `${shipment.address_from.name}`,
+    `${shipment.address_from.company}`,
+    `${shipment.address_from.street1}`,
+    `${shipment.address_from.city}, ${shipment.address_from.state} ${shipment.address_from.zip}`,
+    '',
+    '*To:*',
+    `${shipment.address_to.name}`,
+    `${shipment.address_to.street1}`,
+    `${shipment.address_to.city}, ${shipment.address_to.state} ${shipment.address_to.zip}`,
+    '',
+    '*Parcel:*',
+    `${shipment.parcels[0].length}" x ${shipment.parcels[0].width}" x ${shipment.parcels[0].height}" (${shipment.parcels[0].weight} lb)`
+  ];
+
+  try {
+    await client.views.update({
+      view_id: view.id,
+      view: {
+        type: 'modal',
+        callback_id: 'returnlabel_review_modal',
+        private_metadata: reviewMetadata,
+        title: {
+          type: 'plain_text',
+          text: 'Return Label – Review',
+          emoji: true
+        },
+        submit: {
+          type: 'plain_text',
+          text: 'Create Label',
+          emoji: true
+        },
+        close: {
+          type: 'plain_text',
+          text: 'Back',
+          emoji: true
+        },
+        blocks: [
+          {
+            type: 'section',
+            text: {
+              type: 'mrkdwn',
+              text: 'Please review the details below. Click *Create Label* to generate the return label.'
+            }
+          },
+          {
+            type: 'divider'
+          },
+          {
+            type: 'section',
+            text: {
+              type: 'mrkdwn',
+              text: reviewTextLines.join('\n')
+            }
+          }
+        ]
+      }
+    });
+  } catch (e) {
+    log.error?.('Failed to update to review modal:', e?.stack || e?.message || e);
+  }
+});
+
+/**
+ * View submission handler for the "Review" modal.
+ * Calls Shippo to create the label, downloads the PDF, and uploads to Slack.
+ */
+slackApp.view('returnlabel_review_modal', async ({ ack, body, view, client, logger }) => {
+  // Close the modal
+  await ack();
+
+  const log = logger || console;
+
+  let channelId = null;
+  let shipment = null;
+
+  try {
+    const meta = view.private_metadata ? JSON.parse(view.private_metadata) : {};
+    channelId = meta.channelId || null;
+    shipment = meta.shipment || null;
+  } catch (e) {
+    log.error?.('Failed to parse private_metadata in review modal:', e?.stack || e?.message || e);
+  }
+
+  if (!channelId || !shipment) {
+    log.error?.('Missing channelId or shipment data in review modal.');
+    return;
+  }
+
   // 1) Create the label via Shippo
   let label;
   try {
-    label = await createTestReturnLabelWithShippo(logger);
+    label = await createReturnLabelWithShippo(shipment, logger);
   } catch (e) {
     const msg = e?.message || String(e);
-    console.error('Failed to create Shippo test return label:', e?.stack || msg);
+    console.error('Failed to create Shippo return label:', e?.stack || msg);
     try {
       await client.chat.postMessage({
-        channel: targetChannel,
-        text: `❌ Failed to create Shippo test return label: \`${msg}\``
+        channel: channelId,
+        text: `❌ Failed to create Shippo return label: \`${msg}\``
       });
     } catch (postErr) {
       console.error('Additionally failed to post error back to Slack:', postErr?.stack || postErr?.message || postErr);
@@ -308,7 +703,7 @@ slackApp.command('/returnlabel', async ({ ack, body, client, logger }) => {
     return;
   }
 
-    const { trackingNumber, labelUrl } = label;
+  const { trackingNumber, labelUrl } = label;
 
   // 2) Download the PDF from Shippo
   let pdfBuffer;
@@ -320,15 +715,15 @@ slackApp.command('/returnlabel', async ({ ack, body, client, logger }) => {
     }
     const pdfArrayBuf = await pdfRes.arrayBuffer();
     pdfBuffer = Buffer.from(pdfArrayBuf);
-    } catch (e) {
+  } catch (e) {
     const msg = e?.message || String(e);
     console.error('Failed to download Shippo label PDF:', e?.stack || msg);
     // Fall back to at least sending the tracking number
     try {
       await client.chat.postMessage({
-        channel: targetChannel,
+        channel: channelId,
         text:
-          `✅ Created Shippo test return label, but failed to download the PDF.\n` +
+          `✅ Created Shippo return label, but failed to download the PDF.\n` +
           `*Tracking number:* ${trackingNumber || 'N/A'}\n` +
           `Error downloading PDF: \`${msg}\``
       });
@@ -338,25 +733,25 @@ slackApp.command('/returnlabel', async ({ ack, body, client, logger }) => {
     return;
   }
 
-    // 3) Upload the PDF into Slack
+  // 3) Upload the PDF into Slack
   try {
     await client.files.uploadV2({
-      channel_id: targetChannel,
-      filename: 'return-label-test.pdf',
+      channel_id: channelId,
+      filename: 'return-label.pdf',
       file: pdfBuffer,
       initial_comment:
-        `📦 *Test return label created via Shippo*\n` +
+        `📦 *Return label created via Shippo*\n` +
         `• *Tracking number:* ${trackingNumber || 'N/A'}`
     });
-   } catch (e) {
+  } catch (e) {
     const msg = e?.message || String(e);
     console.error('Failed to upload label PDF to Slack:', e?.stack || msg);
     // Fallback: send tracking number as plain message
     try {
       await client.chat.postMessage({
-        channel: targetChannel,
+        channel: channelId,
         text:
-          `✅ Created Shippo test return label, but failed to upload the PDF to Slack.\n` +
+          `✅ Created Shippo return label, but failed to upload the PDF to Slack.\n` +
           `*Tracking number:* ${trackingNumber || 'N/A'}\n` +
           `Upload error: \`${msg}\``
       });
