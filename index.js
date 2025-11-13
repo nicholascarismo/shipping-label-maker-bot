@@ -208,12 +208,19 @@ webApp.use((req, res) => {
     // We do not exit; the bot can still run but persistence will be degraded.
   }
 
-  const port = Number(PORT) || 3000;
-
-  // Start Express HTTP server
-  webApp.listen(port, () => {
-    console.log(`🌐 Express server listening on port ${port} (healthcheck at /health)`);
-  });
+  // Start Express HTTP server only if PORT is explicitly set.
+  if (PORT && String(PORT).trim() !== '') {
+    const port = Number(PORT);
+    if (!Number.isFinite(port) || port <= 0) {
+      console.error(`❌ Invalid PORT value "${PORT}". Skipping Express HTTP server start.`);
+    } else {
+      webApp.listen(port, () => {
+        console.log(`🌐 Express server listening on port ${port} (healthcheck at /health)`);
+      });
+    }
+  } else {
+    console.log('ℹ️ PORT not set; skipping Express HTTP server.');
+  }
 
   // Start Slack Bolt app (Socket Mode)
   try {
