@@ -157,7 +157,7 @@ async function createTestReturnLabelWithShippo(logger) {
   // 2) Buy a label (transaction) for that rate
   const transactionBody = {
     rate: chosenRate.object_id,
-    label_file_type: 'PDF',
+    label_file_type: 'PDF_4x6',
     async: false
   };
 
@@ -308,7 +308,7 @@ slackApp.command('/returnlabel', async ({ ack, body, client, logger }) => {
     return;
   }
 
-  const { trackingNumber, labelUrl, trackingUrl } = label;
+    const { trackingNumber, labelUrl } = label;
 
   // 2) Download the PDF from Shippo
   let pdfBuffer;
@@ -320,18 +320,16 @@ slackApp.command('/returnlabel', async ({ ack, body, client, logger }) => {
     }
     const pdfArrayBuf = await pdfRes.arrayBuffer();
     pdfBuffer = Buffer.from(pdfArrayBuf);
-  } catch (e) {
+    } catch (e) {
     const msg = e?.message || String(e);
     console.error('Failed to download Shippo label PDF:', e?.stack || msg);
-    // Fall back to at least sending the URL + tracking
+    // Fall back to at least sending the tracking number
     try {
       await client.chat.postMessage({
         channel: targetChannel,
         text:
           `✅ Created Shippo test return label, but failed to download the PDF.\n` +
           `*Tracking number:* ${trackingNumber || 'N/A'}\n` +
-          `*Shippo label URL:* ${labelUrl}\n` +
-          (trackingUrl ? `*Tracking link:* ${trackingUrl}\n` : '') +
           `Error downloading PDF: \`${msg}\``
       });
     } catch (postErr) {
@@ -340,7 +338,7 @@ slackApp.command('/returnlabel', async ({ ack, body, client, logger }) => {
     return;
   }
 
-  // 3) Upload the PDF into Slack
+    // 3) Upload the PDF into Slack
   try {
     await client.files.uploadV2({
       channel_id: targetChannel,
@@ -348,22 +346,18 @@ slackApp.command('/returnlabel', async ({ ack, body, client, logger }) => {
       file: pdfBuffer,
       initial_comment:
         `📦 *Test return label created via Shippo*\n` +
-        `• *Tracking number:* ${trackingNumber || 'N/A'}\n` +
-        (trackingUrl ? `• *Tracking link:* ${trackingUrl}\n` : '') +
-        `• *Shippo label URL:* ${labelUrl}`
+        `• *Tracking number:* ${trackingNumber || 'N/A'}`
     });
-  } catch (e) {
+   } catch (e) {
     const msg = e?.message || String(e);
     console.error('Failed to upload label PDF to Slack:', e?.stack || msg);
-    // Fallback: send label URL + tracking as plain message
+    // Fallback: send tracking number as plain message
     try {
       await client.chat.postMessage({
         channel: targetChannel,
         text:
           `✅ Created Shippo test return label, but failed to upload the PDF to Slack.\n` +
           `*Tracking number:* ${trackingNumber || 'N/A'}\n` +
-          `*Shippo label URL:* ${labelUrl}\n` +
-          (trackingUrl ? `*Tracking link:* ${trackingUrl}\n` : '') +
           `Upload error: \`${msg}\``
       });
     } catch (postErr) {
