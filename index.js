@@ -517,8 +517,6 @@ slackApp.command('/returnlabel', async ({ ack, body, client, logger }) => {
  * Builds a shipment object and updates the modal into a "Review" modal.
  */
 slackApp.view('returnlabel_edit_modal', async ({ ack, body, view, client, logger }) => {
-  await ack();
-
   const log = logger || console;
 
   // Recover metadata (channelId)
@@ -611,52 +609,49 @@ slackApp.view('returnlabel_edit_modal', async ({ ack, body, view, client, logger
     `${shipment.parcels[0].length}" x ${shipment.parcels[0].width}" x ${shipment.parcels[0].height}" (${shipment.parcels[0].weight} lb)`
   ];
 
-  try {
-    await client.views.update({
-      view_id: view.id,
-      view: {
-        type: 'modal',
-        callback_id: 'returnlabel_review_modal',
-        private_metadata: reviewMetadata,
-        title: {
-          type: 'plain_text',
-          text: 'Return Label – Review',
-          emoji: true
-        },
-        submit: {
-          type: 'plain_text',
-          text: 'Create Label',
-          emoji: true
-        },
-        close: {
-          type: 'plain_text',
-          text: 'Back',
-          emoji: true
-        },
-        blocks: [
-          {
-            type: 'section',
-            text: {
-              type: 'mrkdwn',
-              text: 'Please review the details below. Click *Create Label* to generate the return label.'
-            }
-          },
-          {
-            type: 'divider'
-          },
-          {
-            type: 'section',
-            text: {
-              type: 'mrkdwn',
-              text: reviewTextLines.join('\n')
-            }
+  // Use ack with response_action=update to turn this into the review modal
+  await ack({
+    response_action: 'update',
+    view: {
+      type: 'modal',
+      callback_id: 'returnlabel_review_modal',
+      private_metadata: reviewMetadata,
+      title: {
+        type: 'plain_text',
+        text: 'Return Label – Review',
+        emoji: true
+      },
+      submit: {
+        type: 'plain_text',
+        text: 'Create Label',
+        emoji: true
+      },
+      close: {
+        type: 'plain_text',
+        text: 'Back',
+        emoji: true
+      },
+      blocks: [
+        {
+          type: 'section',
+          text: {
+            type: 'mrkdwn',
+            text: 'Please review the details below. Click *Create Label* to generate the return label.'
           }
-        ]
-      }
-    });
-  } catch (e) {
-    log.error?.('Failed to update to review modal:', e?.stack || e?.message || e);
-  }
+        },
+        {
+          type: 'divider'
+        },
+        {
+          type: 'section',
+          text: {
+            type: 'mrkdwn',
+            text: reviewTextLines.join('\n')
+          }
+        }
+      ]
+    }
+  });
 });
 
 /**
