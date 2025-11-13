@@ -77,7 +77,7 @@ async function appendCommandLog(entry) {
 
 /**
  * Create a return label via Shippo using the provided shipment data.
- * Returns { trackingNumber, labelUrl, trackingUrl, serviceName, etaDays } on success.
+ * Returns { trackingNumber, labelUrl, trackingUrl, carrierName, serviceName, etaDays } on success.
  *
  * Uses Shippo's "create shipment -> buy label" flow:
  *  1) POST /shipments
@@ -155,10 +155,16 @@ async function createReturnLabelWithShippo(shipmentBody, logger) {
   const labelUrl = transaction.label_url || transaction.label_file || null;
   const trackingUrl = transaction.tracking_url_provider || null;
 
+  const carrierName =
+    chosenRate.provider ||
+    chosenRate.carrier ||
+    (chosenRate.carrier_account && chosenRate.carrier_account.carrier) ||
+    'Unknown carrier';
+
   const serviceName =
     (chosenRate.servicelevel && chosenRate.servicelevel.name) ||
     chosenRate.servicelevel_name ||
-    chosenRate.provider ||
+    chosenRate.service ||
     'Unknown service';
 
   const etaDays =
@@ -174,6 +180,7 @@ async function createReturnLabelWithShippo(shipmentBody, logger) {
     trackingNumber,
     labelUrl,
     trackingUrl,
+    carrierName,
     serviceName,
     etaDays
   };
@@ -711,7 +718,7 @@ slackApp.view('returnlabel_review_modal', async ({ ack, body, view, client, logg
     return;
   }
 
-  const { trackingNumber, labelUrl, serviceName, etaDays } = label;
+  const { trackingNumber, labelUrl, carrierName, serviceName, etaDays } = label;
 
   const etaDescription =
     typeof etaDays === 'number'
@@ -731,13 +738,14 @@ slackApp.view('returnlabel_review_modal', async ({ ack, body, view, client, logg
   } catch (e) {
     const msg = e?.message || String(e);
     console.error('Failed to download Shippo label PDF:', e?.stack || msg);
-    // Fall back to at least sending the tracking number + service + ETA
+    // Fall back to at least sending the tracking number + carrier + service + ETA
     try {
       await client.chat.postMessage({
         channel: channelId,
         text:
           `✅ Created Shippo return label, but failed to download the PDF.\n` +
           `*Tracking number:* ${trackingNumber || 'N/A'}\n` +
+          `*Carrier:* ${carrierName || 'N/A'}\n` +
           `*Service:* ${serviceName || 'N/A'}\n` +
           `*ETA:* ${etaDescription}\n` +
           `Error downloading PDF: \`${msg}\``
@@ -757,19 +765,21 @@ slackApp.view('returnlabel_review_modal', async ({ ack, body, view, client, logg
       initial_comment:
         `📦 *Return label created via Shippo*\n` +
         `• *Tracking number:* ${trackingNumber || 'N/A'}\n` +
+        `• *Carrier:* ${carrierName || 'N/A'}\n` +
         `• *Service:* ${serviceName || 'N/A'}\n` +
         `• *ETA:* ${etaDescription}`
     });
   } catch (e) {
     const msg = e?.message || String(e);
     console.error('Failed to upload label PDF to Slack:', e?.stack || msg);
-    // Fallback: send tracking number + service + ETA as plain message
+    // Fallback: send tracking number + carrier + service + ETA as plain message
     try {
       await client.chat.postMessage({
         channel: channelId,
         text:
           `✅ Created Shippo return label, but failed to upload the PDF to Slack.\n` +
           `*Tracking number:* ${trackingNumber || 'N/A'}\n` +
+          `*Carrier:* ${carrierName || 'N/A'}\n` +
           `*Service:* ${serviceName || 'N/A'}\n` +
           `*ETA:* ${etaDescription}\n` +
           `Upload error: \`${msg}\``
