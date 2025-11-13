@@ -763,7 +763,7 @@ slackApp.view('returnlabel_review_modal', async ({ ack, body, view, client, logg
       filename: 'return-label.pdf',
       file: pdfBuffer,
       initial_comment:
-        `📦 *Return label created via Shippo*\n` +
+        `📦 *Return label created*\n` +
         `• *Tracking number:* ${trackingNumber || 'N/A'}\n` +
         `• *Carrier:* ${carrierName || 'N/A'}\n` +
         `• *Service:* ${serviceName || 'N/A'}\n` +
