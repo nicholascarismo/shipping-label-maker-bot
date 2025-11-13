@@ -132,17 +132,16 @@ slackApp.command('/shippinglabel', async ({ ack, body, client, logger }) => {
 });
 
 /**
- * /returnlabel baseline handler
- * For now:
+ * /returnlabel handler
+ * Now:
  *  - Acks promptly
  *  - Logs command usage into ./data/commands-log.json
- *  - Posts a confirmation message into WATCH_CHANNEL_ID (if set) or the invoking channel
+ *  - Opens a modal asking for default/custom "ship from" and "package info"
  */
 slackApp.command('/returnlabel', async ({ ack, body, client, logger }) => {
   await ack();
 
   const nowIso = new Date().toISOString();
-  const targetChannel = WATCH_CHANNEL_ID || body.channel_id;
 
   const entry = {
     type: 'returnlabel',
@@ -161,12 +160,120 @@ slackApp.command('/returnlabel', async ({ ack, body, client, logger }) => {
   }
 
   try {
-    await client.chat.postMessage({
-      channel: targetChannel,
-      text: '📦 Received `/returnlabel`. Baseline bot is running; return label flow will be implemented next.'
+    await client.views.open({
+      trigger_id: body.trigger_id,
+      view: {
+        type: 'modal',
+        callback_id: 'returnlabel_modal',
+        title: {
+          type: 'plain_text',
+          text: 'Return Label',
+          emoji: true
+        },
+        submit: {
+          type: 'plain_text',
+          text: 'Continue',
+          emoji: true
+        },
+        close: {
+          type: 'plain_text',
+          text: 'Cancel',
+          emoji: true
+        },
+        blocks: [
+          {
+            type: 'section',
+            text: {
+              type: 'mrkdwn',
+              text: 'Configure your return label options.'
+            }
+          },
+          {
+            type: 'divider'
+          },
+          {
+            type: 'input',
+            block_id: 'ship_from_choice_block',
+            label: {
+              type: 'plain_text',
+              text: 'Ship From Address',
+              emoji: true
+            },
+            element: {
+              type: 'radio_buttons',
+              action_id: 'ship_from_choice',
+              initial_option: {
+                text: {
+                  type: 'plain_text',
+                  text: 'Use default ship-from address',
+                  emoji: true
+                },
+                value: 'default_ship_from'
+              },
+              options: [
+                {
+                  text: {
+                    type: 'plain_text',
+                    text: 'Use default ship-from address',
+                    emoji: true
+                  },
+                  value: 'default_ship_from'
+                },
+                {
+                  text: {
+                    type: 'plain_text',
+                    text: 'Enter a custom ship-from address',
+                    emoji: true
+                  },
+                  value: 'custom_ship_from'
+                }
+              ]
+            }
+          },
+          {
+            type: 'input',
+            block_id: 'package_info_choice_block',
+            label: {
+              type: 'plain_text',
+              text: 'Package Info',
+              emoji: true
+            },
+            element: {
+              type: 'radio_buttons',
+              action_id: 'package_info_choice',
+              initial_option: {
+                text: {
+                  type: 'plain_text',
+                  text: 'Use default package info',
+                  emoji: true
+                },
+                value: 'default_package_info'
+              },
+              options: [
+                {
+                  text: {
+                    type: 'plain_text',
+                    text: 'Use default package info',
+                    emoji: true
+                  },
+                  value: 'default_package_info'
+                },
+                {
+                  text: {
+                    type: 'plain_text',
+                    text: 'Enter custom package info',
+                    emoji: true
+                  },
+                  value: 'custom_package_info'
+                }
+              ]
+            }
+          }
+        ]
+      }
     });
   } catch (e) {
-    console.error('Failed to post /returnlabel response:', e?.stack || e?.message || e);
+    console.error('Failed to open /returnlabel modal:', e?.stack || e?.message || e);
   }
 });
 
