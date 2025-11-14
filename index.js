@@ -92,6 +92,55 @@ const DEFAULT_PARCEL = {
 };
 
 /**
+ * DM the user reminding them to track labels in Parcel App.
+ * Includes tracking number and both addresses for context.
+ */
+async function sendParcelReminderDm(client, userId, shipment, trackingNumber, labelKind) {
+  if (!client || !userId || !shipment) return;
+
+  const kindText = labelKind === 'return' ? 'return label' : 'shipping label';
+
+  const from = shipment.address_from || {};
+  const to = shipment.address_to || {};
+
+  const lines = [
+    `<@${userId}> heads up: a ${kindText} was just created by shipping-label-maker-bot.`,
+    '',
+    'If this label needs to be tracked (for example, a return label or any shipment incoming to HQ), please add it to the shared *Parcel App*.',
+    'The SOP for this is in the pinned messages in #shipment-updates.',
+    '',
+    `*Tracking number:* ${trackingNumber || 'N/A'}`,
+    '',
+    '*Ship From:*',
+    `• Name: ${from.name || 'N/A'}`,
+    `• Company: ${from.company || 'N/A'}`,
+    `• Street: ${from.street1 || 'N/A'}`,
+    `• Street 2: ${from.street2 || 'N/A'}`,
+    `• City: ${from.city || 'N/A'}`,
+    `• State: ${from.state || 'N/A'}`,
+    `• ZIP: ${from.zip || 'N/A'}`,
+    '',
+    '*Ship To:*',
+    `• Name: ${to.name || 'N/A'}`,
+    `• Company: ${to.company || 'N/A'}`,
+    `• Street: ${to.street1 || 'N/A'}`,
+    `• Street 2: ${to.street2 || 'N/A'}`,
+    `• City: ${to.city || 'N/A'}`,
+    `• State: ${to.state || 'N/A'}`,
+    `• ZIP: ${to.zip || 'N/A'}`
+  ];
+
+  try {
+    await client.chat.postMessage({
+      channel: userId,
+      text: lines.join('\n')
+    });
+  } catch (e) {
+    console.warn('⚠️ Failed to send Parcel reminder DM:', e?.stack || e?.message || e);
+  }
+}
+
+/**
  * More flexible US multi-line address parser.
  *
  * Heuristics:
@@ -1125,8 +1174,8 @@ slackApp.view('shippinglabel_edit_modal', async ({ ack, body, view, client, logg
   // Service mode
   const serviceMode = values['service_mode_block']?.['service_mode']?.selected_option?.value || 'default';
 
-  // Helper to format rates into blocks (list + buttons) – SHIPPING FLOW
-  function buildRateBlocks(ratesArr) {
+    // Helper to format rates into blocks (list + buttons) – SHIPPING FLOW
+  function buildRateBlocks(ratesArr, userIdTag) {
     const lines = ratesArr.map((r, idx) => {
       const provider = r.provider || r.carrier || (r.carrier_account && r.carrier_account.carrier) || 'Unknown';
       const service  = (r.servicelevel && r.servicelevel.name) || r.servicelevel_name || r.service || 'Unknown';
@@ -1173,10 +1222,14 @@ slackApp.view('shippinglabel_edit_modal', async ({ ack, body, view, client, logg
       });
     }
 
+    const headingText = userIdTag
+      ? `*Select a shipping service for this shipping label, <@${userIdTag}>:*`
+      : '*Select a shipping service for this shipping label:*';
+
     return [
       {
         type: 'section',
-        text: { type: 'mrkdwn', text: '*Select a shipping service for this shipping label:*' }
+        text: { type: 'mrkdwn', text: headingText }
       },
       {
         type: 'section',
@@ -1228,7 +1281,7 @@ slackApp.view('shippinglabel_edit_modal', async ({ ack, body, view, client, logg
     try {
       await client.chat.postMessage({
         channel: postChannel,
-        blocks: buildRateBlocks(rates),
+        blocks: buildRateBlocks(rates, userIdFromMeta || ephemeralUserId),
         text: 'Select a shipping service',
         thread_ts: threadTs
       });
@@ -1259,7 +1312,7 @@ slackApp.view('shippinglabel_edit_modal', async ({ ack, body, view, client, logg
         channel: ephemeralChannelId,
         user: ephemeralUserId,
         text: 'UPS Ground not available for this shipment. Please choose a service from the options below.',
-        blocks: buildRateBlocks(rates),
+        blocks: buildRateBlocks(rates, userIdFromMeta || ephemeralUserId),
         thread_ts: threadTs
       });
     } catch (e) {
@@ -1295,11 +1348,12 @@ slackApp.view('shippinglabel_edit_modal', async ({ ack, body, view, client, logg
       ? `${selectedRate.etaDays} business day${selectedRate.etaDays === 1 ? '' : 's'}`
       : 'N/A';
 
-  const reviewMetadata = JSON.stringify({
+    const reviewMetadata = JSON.stringify({
     channelId,
     shipment,
     selectedRate,
-    threadTs: threadTsFromMeta || null
+    threadTs: threadTsFromMeta || null,
+    userId: userIdFromMeta || null
   });
 
   const fromLines = [
@@ -1521,8 +1575,8 @@ slackApp.view('returnlabel_edit_modal', async ({ ack, body, view, client, logger
   const serviceMode =
     values['service_mode_block']?.['service_mode']?.selected_option?.value || 'default';
 
-  // Helper to format rates into blocks (list + buttons) – RETURN FLOW
-  function buildRateBlocks(ratesArr) {
+    // Helper to format rates into blocks (list + buttons) – RETURN FLOW
+  function buildRateBlocks(ratesArr, userIdTag) {
     const lines = ratesArr.map((r, idx) => {
       const provider =
         r.provider || r.carrier || (r.carrier_account && r.carrier_account.carrier) || 'Unknown';
@@ -1585,10 +1639,14 @@ slackApp.view('returnlabel_edit_modal', async ({ ack, body, view, client, logger
       });
     }
 
+    const headingText = userIdTag
+      ? `*Select a shipping service for this return label, <@${userIdTag}>:*`
+      : '*Select a shipping service for this return label:*';
+
     return [
       {
         type: 'section',
-        text: { type: 'mrkdwn', text: '*Select a shipping service for this return label:*' }
+        text: { type: 'mrkdwn', text: headingText }
       },
       {
         type: 'section',
@@ -1639,7 +1697,7 @@ slackApp.view('returnlabel_edit_modal', async ({ ack, body, view, client, logger
     try {
       await client.chat.postMessage({
         channel: postChannel,
-        blocks: buildRateBlocks(rates),
+        blocks: buildRateBlocks(rates, userIdFromMeta || ephemeralUserId),
         text: 'Select a shipping service',
         thread_ts: threadTs
       });
@@ -1709,7 +1767,7 @@ slackApp.view('returnlabel_edit_modal', async ({ ack, body, view, client, logger
         user: ephemeralUserId,
         text:
           'UPS Ground not available for this shipment. Please choose a service from the options below.',
-        blocks: buildRateBlocks(rates),
+        blocks: buildRateBlocks(rates, userIdFromMeta || ephemeralUserId),
         thread_ts: threadTs
       });
     } catch (e2) {
@@ -1760,12 +1818,15 @@ slackApp.view('returnlabel_edit_modal', async ({ ack, body, view, client, logger
     try {
       await client.chat.postMessage({
         channel: channelId,
-        text: `❌ Failed to create Shippo return label: \`${msg}\``,
+        text: `<@${userIdFromMeta}> ❌ Failed to create Shippo return label: \`${msg}\``,
         thread_ts: threadTs
       });
     } catch {}
     return;
   }
+
+  // Send Parcel reminder DM to the user
+  await sendParcelReminderDm(client, userIdFromMeta, shipment, trackingNumber, 'return');
 
   const etaDescription =
     typeof etaDaysOut === 'number'
@@ -1788,8 +1849,8 @@ slackApp.view('returnlabel_edit_modal', async ({ ack, body, view, client, logger
     try {
       await client.chat.postMessage({
         channel: channelId,
-        text:
-          `✅ Created Shippo return label, but failed to download the PDF.\n` +
+          text:
+          `<@${userIdFromMeta}> ✅ Created Shippo return label, but failed to download the PDF.\n` +
           `*Tracking number:* ${trackingNumber || 'N/A'}\n` +
           `*Carrier:* ${carrierOut || 'N/A'}\n` +
           `*Service:* ${serviceOut || 'N/A'}\n` +
@@ -1808,8 +1869,8 @@ slackApp.view('returnlabel_edit_modal', async ({ ack, body, view, client, logger
       channel_id: channelId,
       filename: 'return-label.pdf',
       file: pdfBuffer,
-      initial_comment:
-        `📦 *Return label created*\n` +
+            initial_comment:
+        `<@${userIdFromMeta}> 📦 *Return label created*\n` +
         `• *Tracking number:* ${trackingNumber || 'N/A'}\n` +
         `• *Carrier:* ${carrierOut || 'N/A'}\n` +
         `• *Service:* ${serviceOut || 'N/A'}\n` +
@@ -1822,8 +1883,8 @@ slackApp.view('returnlabel_edit_modal', async ({ ack, body, view, client, logger
     try {
       await client.chat.postMessage({
         channel: channelId,
-        text:
-          `✅ Created Shippo return label, but failed to upload the PDF to Slack.\n` +
+                text:
+          `<@${userIdFromMeta}> ✅ Created Shippo return label, but failed to upload the PDF to Slack.\n` +
           `*Tracking number:* ${trackingNumber || 'N/A'}\n` +
           `*Carrier:* ${carrierOut || 'N/A'}\n` +
           `*Service:* ${serviceOut || 'N/A'}\n` +
@@ -1871,11 +1932,12 @@ slackApp.action('service_option_select', async ({ ack, body, client, logger }) =
       ? `${selectedRate.etaDays} business day${selectedRate.etaDays === 1 ? '' : 's'}`
       : 'N/A';
 
-  const reviewMetadata = JSON.stringify({
+    const reviewMetadata = JSON.stringify({
     channelId,
     shipment,
     selectedRate,
-    threadTs
+    threadTs,
+    userId: body.user?.id || null
   });
 
   const fromLines = [
@@ -1959,7 +2021,7 @@ slackApp.action('service_option_select', async ({ ack, body, client, logger }) =
     try {
       await client.chat.postMessage({
         channel: channelId,
-        text: `❌ Failed to open Review modal: \`${e?.message || e}\``,
+        text: `<@${body.user?.id}> ❌ Failed to open Review modal: \`${e?.message || e}\``,
         thread_ts: threadTs || undefined
       });
     } catch {}
@@ -1976,10 +2038,11 @@ slackApp.view('shippinglabel_review_modal', async ({ ack, body, view, client, lo
 
   const log = logger || console;
 
-  let channelId = null;
+    let channelId = null;
   let shipment = null;
   let selectedRate = null;
   let threadTs = null;
+  let userIdForDm = null;
 
   try {
     const meta = view.private_metadata ? JSON.parse(view.private_metadata) : {};
@@ -1987,6 +2050,7 @@ slackApp.view('shippinglabel_review_modal', async ({ ack, body, view, client, lo
     shipment = meta.shipment || null;
     selectedRate = meta.selectedRate || null;
     threadTs = meta.threadTs || null;
+    userIdForDm = meta.userId || null;
   } catch (e) {
     log.error?.('Failed to parse private_metadata in shipping review modal:', e?.stack || e?.message || e);
   }
@@ -2023,11 +2087,16 @@ slackApp.view('shippinglabel_review_modal', async ({ ack, body, view, client, lo
     try {
       await client.chat.postMessage({
         channel: channelId,
-        text: `❌ Failed to create Shippo shipping label: \`${msg}\``,
+        text: `${userIdForDm ? `<@${userIdForDm}> ` : ''}❌ Failed to create Shippo shipping label: \`${msg}\``,
         thread_ts: threadTs || undefined
       });
     } catch {}
     return;
+  }
+
+  // Send Parcel reminder DM to the user (if we know who to DM)
+  if (userIdForDm) {
+    await sendParcelReminderDm(client, userIdForDm, shipment, trackingNumber, 'shipping');
   }
 
   const etaDescription =
@@ -2050,8 +2119,8 @@ slackApp.view('shippinglabel_review_modal', async ({ ack, body, view, client, lo
     try {
       await client.chat.postMessage({
         channel: channelId,
-        text:
-          `✅ Created Shippo shipping label, but failed to download the PDF.\n` +
+                text:
+          `${userIdForDm ? `<@${userIdForDm}> ` : ''}✅ Created Shippo shipping label, but failed to download the PDF.\n` +
           `*Tracking number:* ${trackingNumber || 'N/A'}\n` +
           `*Carrier:* ${carrierOut || 'N/A'}\n` +
           `*Service:* ${serviceOut || 'N/A'}\n` +
@@ -2069,8 +2138,8 @@ slackApp.view('shippinglabel_review_modal', async ({ ack, body, view, client, lo
       channel_id: channelId,
       filename: 'shipping-label.pdf',
       file: pdfBuffer,
-      initial_comment:
-        `📦 *Shipping label created*\n` +
+        initial_comment:
+        `${userIdForDm ? `<@${userIdForDm}> ` : ''}📦 *Shipping label created*\n` +
         `• *Tracking number:* ${trackingNumber || 'N/A'}\n` +
         `• *Carrier:* ${carrierOut || 'N/A'}\n` +
         `• *Service:* ${serviceOut || 'N/A'}\n` +
@@ -2083,8 +2152,8 @@ slackApp.view('shippinglabel_review_modal', async ({ ack, body, view, client, lo
     try {
       await client.chat.postMessage({
         channel: channelId,
-        text:
-          `✅ Created Shippo shipping label, but failed to upload the PDF to Slack.\n` +
+                text:
+          `${userIdForDm ? `<@${userIdForDm}> ` : ''}✅ Created Shippo shipping label, but failed to upload the PDF to Slack.\n` +
           `*Tracking number:* ${trackingNumber || 'N/A'}\n` +
           `*Carrier:* ${carrierOut || 'N/A'}\n` +
           `*Service:* ${serviceOut || 'N/A'}\n` +
@@ -2107,10 +2176,11 @@ slackApp.view('returnlabel_review_modal', async ({ ack, body, view, client, logg
 
   const log = logger || console;
 
-  let channelId = null;
+    let channelId = null;
   let shipment = null;
   let selectedRate = null;
   let threadTs = null;
+  let userIdForDm = null;
 
   try {
     const meta = view.private_metadata ? JSON.parse(view.private_metadata) : {};
@@ -2118,6 +2188,7 @@ slackApp.view('returnlabel_review_modal', async ({ ack, body, view, client, logg
     shipment = meta.shipment || null;
     selectedRate = meta.selectedRate || null;
     threadTs = meta.threadTs || null;
+    userIdForDm = meta.userId || null;
   } catch (e) {
     log.error?.('Failed to parse private_metadata in review modal:', e?.stack || e?.message || e);
   }
@@ -2154,11 +2225,15 @@ slackApp.view('returnlabel_review_modal', async ({ ack, body, view, client, logg
     try {
       await client.chat.postMessage({
         channel: channelId,
-        text: `❌ Failed to create Shippo return label: \`${msg}\``,
+        text: `${userIdForDm ? `<@${userIdForDm}> ` : ''}❌ Failed to create Shippo return label: \`${msg}\``,
         thread_ts: threadTs || undefined
       });
     } catch {}
     return;
+  }
+
+  if (userIdForDm) {
+    await sendParcelReminderDm(client, userIdForDm, shipment, trackingNumber, 'return');
   }
 
   const etaDescription =
@@ -2181,8 +2256,8 @@ slackApp.view('returnlabel_review_modal', async ({ ack, body, view, client, logg
     try {
       await client.chat.postMessage({
         channel: channelId,
-        text:
-          `✅ Created Shippo return label, but failed to download the PDF.\n` +
+          text:
+          `<@${userIdFromMeta}> ✅ Created Shippo return label, but failed to download the PDF.\n` +
           `*Tracking number:* ${trackingNumber || 'N/A'}\n` +
           `*Carrier:* ${carrierOut || 'N/A'}\n` +
           `*Service:* ${serviceOut || 'N/A'}\n` +
@@ -2200,8 +2275,8 @@ slackApp.view('returnlabel_review_modal', async ({ ack, body, view, client, logg
       channel_id: channelId,
       filename: 'return-label.pdf',
       file: pdfBuffer,
-      initial_comment:
-        `📦 *Return label created*\n` +
+            initial_comment:
+        `<@${userIdFromMeta}> 📦 *Return label created*\n` +
         `• *Tracking number:* ${trackingNumber || 'N/A'}\n` +
         `• *Carrier:* ${carrierOut || 'N/A'}\n` +
         `• *Service:* ${serviceOut || 'N/A'}\n` +
@@ -2214,8 +2289,8 @@ slackApp.view('returnlabel_review_modal', async ({ ack, body, view, client, logg
     try {
       await client.chat.postMessage({
         channel: channelId,
-        text:
-          `✅ Created Shippo return label, but failed to upload the PDF to Slack.\n` +
+                text:
+          `<@${userIdFromMeta}> ✅ Created Shippo return label, but failed to upload the PDF to Slack.\n` +
           `*Tracking number:* ${trackingNumber || 'N/A'}\n` +
           `*Carrier:* ${carrierOut || 'N/A'}\n` +
           `*Service:* ${serviceOut || 'N/A'}\n` +
