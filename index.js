@@ -745,34 +745,35 @@ slackApp.view('returnlabel_edit_modal', async ({ ack, body, view, client, logger
       return `${idx + 1}. *${provider}* — ${service} — ${price} — ${eta}`;
     });
 
-    // Chunk buttons 5 per row
     const actionBlocks = [];
-    for (let i = 0; i < ratesArr.length; i += 5) {
-      const slice = ratesArr.slice(i, i + 5);
+
+    // ONE button per actions block to avoid duplicate action_id errors
+    for (const r of ratesArr) {
+      const provider = r.provider || r.carrier || (r.carrier_account && r.carrier_account.carrier) || 'Unknown';
+      const service  = (r.servicelevel && r.servicelevel.name) || r.servicelevel_name || r.service || 'Unknown';
+      const valuePayload = {
+        channelId,
+        shipment,
+        selectedRate: {
+          id: r.object_id,
+          provider,
+          service,
+          amount: r.amount || null,
+          currency: r.currency || 'USD',
+          etaDays: typeof r.estimated_days === 'number' ? r.estimated_days : null
+        }
+      };
+
       actionBlocks.push({
         type: 'actions',
-        elements: slice.map((r) => {
-          const provider = r.provider || r.carrier || (r.carrier_account && r.carrier_account.carrier) || 'Unknown';
-          const service  = (r.servicelevel && r.servicelevel.name) || r.servicelevel_name || r.service || 'Unknown';
-          const valuePayload = {
-            channelId,
-            shipment,
-            selectedRate: {
-              id: r.object_id,
-              provider,
-              service,
-              amount: r.amount || null,
-              currency: r.currency || 'USD',
-              etaDays: typeof r.estimated_days === 'number' ? r.estimated_days : null
-            }
-          };
-          return {
+        elements: [
+          {
             type: 'button',
             action_id: 'service_option_select',
             text: { type: 'plain_text', text: `${provider} – ${service}`, emoji: true },
             value: JSON.stringify(valuePayload)
-          };
-        })
+          }
+        ]
       });
     }
 
@@ -834,11 +835,13 @@ slackApp.view('returnlabel_edit_modal', async ({ ack, body, view, client, logger
     return;
   }
 
-  // Default mode: try UPS Ground first; if missing, fall back to choose flow.
+  // Default mode: try UPS Ground (but NOT UPS Ground Saver) first; if missing, fall back to choose flow.
   const upsGround = rates.find((r) => {
     const provider = (r.provider || r.carrier || (r.carrier_account && r.carrier_account.carrier) || '').toLowerCase();
     const service  = ((r.servicelevel && r.servicelevel.name) || r.servicelevel_name || r.service || '').toLowerCase();
-    return provider === 'ups' && service.includes('ground');
+
+    // Require UPS + "ground" in the service name, but explicitly exclude any "saver" variants.
+    return provider === 'ups' && service.includes('ground') && !service.includes('saver');
   });
 
   if (!upsGround) {
