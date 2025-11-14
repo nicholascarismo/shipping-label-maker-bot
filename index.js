@@ -1338,15 +1338,23 @@ slackApp.view('shippinglabel_edit_modal', async ({ ack, body, view, client, logg
 });
 
 /**
- * View submission handler for the "Edit Details" modal.
- * Builds a shipment object. If service_mode=choose, posts rate options with buttons.
- * If service_mode=default, tries UPS Ground; if missing, posts rate options.
- * Review modal is opened either immediately (UPS Ground chosen) or after button pick.
+ * View submission handler for the "Edit Details" modal (returnlabel).
+ *
+ * IMPORTANT CHANGES:
+ *  - We ACK IMMEDIATELY so Slack never shows "We had some trouble connecting".
+ *  - For service_mode = "choose": we fetch rates and post an ephemeral chooser
+ *    (re-using your existing `service_option_select` action handler).
+ *  - For service_mode = "default": we auto-pick UPS Ground (if available),
+ *    buy the label, download the PDF, and upload it directly to the target channel
+ *    (no review modal; the label message itself is the confirmation).
  */
 slackApp.view('returnlabel_edit_modal', async ({ ack, body, view, client, logger }) => {
   const log = logger || console;
 
-  // Recover metadata (channelId, userChannelId, userId)
+  // 1) ACK IMMEDIATELY so Slack doesn't time out this view submission.
+  await ack();
+
+  // 2) Recover metadata (channelId, userChannelId, userId)
   let channelId = null;
   let userChannelId = null;
   let userIdFromMeta = null;
@@ -1356,78 +1364,86 @@ slackApp.view('returnlabel_edit_modal', async ({ ack, body, view, client, logger
     userChannelId = meta.userChannelId || null;
     userIdFromMeta = meta.userId || null;
   } catch (e) {
-    log.error?.('Failed to parse private_metadata in edit modal:', e?.stack || e?.message || e);
+    log.error?.('Failed to parse private_metadata in return edit modal:', e?.stack || e?.message || e);
   }
 
-  const ephemeralChannelId = userChannelId || channelId || body.channel?.id || body.team?.id || undefined;
+  const ephemeralChannelId =
+    userChannelId || channelId || body.channel?.id || body.team?.id || undefined;
   const ephemeralUserId = userIdFromMeta || body.user?.id;
 
   const values = view.state.values;
   const getVal = (b, a) => values[b]?.[a]?.value || '';
 
-// Ship From mode and raw input
-const fromMode = values['from_address_mode_block']?.['from_address_mode']?.selected_option?.value || 'default';
-const fromAddressInputRaw = getVal('from_address_multiline_block', 'from_address_multiline') || '';
-const fromAddressTrimmed = fromAddressInputRaw.trim();
+  // 3) Ship From mode and raw input
+  const fromMode =
+    values['from_address_mode_block']?.['from_address_mode']?.selected_option?.value || 'default';
+  const fromAddressInputRaw =
+    getVal('from_address_multiline_block', 'from_address_multiline') || '';
+  const fromAddressTrimmed = fromAddressInputRaw.trim();
 
-// If user typed anything, treat it as "custom" regardless of radio selection
-const fromModeResolved = fromAddressTrimmed.length > 0 ? 'custom' : fromMode;
+  // If user typed anything, treat it as "custom" regardless of radio selection
+  const fromModeResolved = fromAddressTrimmed.length > 0 ? 'custom' : fromMode;
 
-// Backend default is still Carismo unless they typed something
-const fromRawText =
-  fromModeResolved === 'default'
-    ? DEFAULT_FROM_ADDRESS_TEXT
-    : (fromAddressTrimmed || DEFAULT_FROM_ADDRESS_TEXT);
+  // Backend default is still Carismo unless they typed something
+  const fromRawText =
+    fromModeResolved === 'default'
+      ? DEFAULT_FROM_ADDRESS_TEXT
+      : (fromAddressTrimmed || DEFAULT_FROM_ADDRESS_TEXT);
 
-  // Ship To fixed
+  // 4) Ship To fixed (returns back to Carismo)
   const toRawText = DEFAULT_TO_ADDRESS_TEXT;
 
   // Parse addresses
   const parsedFrom = parseAddressMultiline(fromRawText);
   const parsedTo = parseAddressMultiline(toRawText);
 
- // Package mode & values
-const parcelMode = values['parcel_mode_block']?.['parcel_mode']?.selected_option?.value || 'default';
-const parcelLengthRaw = getVal('parcel_length_block', 'parcel_length').trim();
-const parcelWidthRaw  = getVal('parcel_width_block',  'parcel_width').trim();
-const parcelHeightRaw = getVal('parcel_height_block', 'parcel_height').trim();
-const parcelWeightRaw = getVal('parcel_weight_block', 'parcel_weight').trim();
+  // 5) Package mode & values
+  const parcelMode =
+    values['parcel_mode_block']?.['parcel_mode']?.selected_option?.value || 'default';
+  const parcelLengthRaw = getVal('parcel_length_block', 'parcel_length').trim();
+  const parcelWidthRaw = getVal('parcel_width_block', 'parcel_width').trim();
+  const parcelHeightRaw = getVal('parcel_height_block', 'parcel_height').trim();
+  const parcelWeightRaw = getVal('parcel_weight_block', 'parcel_weight').trim();
 
-// If any custom fields have content, treat as "custom" regardless of radio selection
-const hasAnyParcelInput =
-  parcelLengthRaw.length > 0 ||
-  parcelWidthRaw.length > 0 ||
-  parcelHeightRaw.length > 0 ||
-  parcelWeightRaw.length > 0;
+  // If any custom fields have content, treat as "custom" regardless of radio selection
+  const hasAnyParcelInput =
+    parcelLengthRaw.length > 0 ||
+    parcelWidthRaw.length > 0 ||
+    parcelHeightRaw.length > 0 ||
+    parcelWeightRaw.length > 0;
 
-const parcelModeResolved = hasAnyParcelInput ? 'custom' : parcelMode;
+  const parcelModeResolved = hasAnyParcelInput ? 'custom' : parcelMode;
 
-if (parcelModeResolved === 'custom') {
-  const errors = {};
-  if (!parcelLengthRaw) errors['parcel_length_block'] = 'Required when using custom package info.';
-  if (!parcelWidthRaw)  errors['parcel_width_block']  = 'Required when using custom package info.';
-  if (!parcelHeightRaw) errors['parcel_height_block'] = 'Required when using custom package info.';
-  if (!parcelWeightRaw) errors['parcel_weight_block'] = 'Required when using custom package info.';
-  if (Object.keys(errors).length > 0) {
-    await ack({ response_action: 'errors', errors });
-    return;
-  }
-}
+  // Instead of rejecting with Slack "errors", we:
+  //  - If user chose custom (or typed anything), use their numbers when present
+  //    and silently fall back to defaults for any missing fields.
+  const parcelLength =
+    parcelModeResolved === 'default'
+      ? DEFAULT_PARCEL.length
+      : (parcelLengthRaw || DEFAULT_PARCEL.length);
+  const parcelWidth =
+    parcelModeResolved === 'default'
+      ? DEFAULT_PARCEL.width
+      : (parcelWidthRaw || DEFAULT_PARCEL.width);
+  const parcelHeight =
+    parcelModeResolved === 'default'
+      ? DEFAULT_PARCEL.height
+      : (parcelHeightRaw || DEFAULT_PARCEL.height);
+  const parcelWeight =
+    parcelModeResolved === 'default'
+      ? DEFAULT_PARCEL.weight
+      : (parcelWeightRaw || DEFAULT_PARCEL.weight);
 
-const parcelLength = parcelModeResolved === 'default' ? DEFAULT_PARCEL.length : (parcelLengthRaw || DEFAULT_PARCEL.length);
-const parcelWidth  = parcelModeResolved === 'default' ? DEFAULT_PARCEL.width  : (parcelWidthRaw  || DEFAULT_PARCEL.width);
-const parcelHeight = parcelModeResolved === 'default' ? DEFAULT_PARCEL.height : (parcelHeightRaw || DEFAULT_PARCEL.height);
-const parcelWeight = parcelModeResolved === 'default' ? DEFAULT_PARCEL.weight : (parcelWeightRaw || DEFAULT_PARCEL.weight);
+  // 6) Signature requirement:
+  // - Default: require STANDARD signature
+  // - If checkbox is checked → do NOT require signature (omit signature_confirmation)
+  const signatureSelection =
+    values['signature_block']?.['signature_toggle']?.selected_options || [];
+  const requireSignature =
+    !Array.isArray(signatureSelection) || signatureSelection.length === 0;
 
-// Signature requirement:
-// - Default: require STANDARD signature
-// - If checkbox is checked → do NOT require signature (omit signature_confirmation)
-const signatureSelection =
-  values['signature_block']?.['signature_toggle']?.selected_options || [];
-const requireSignature = !Array.isArray(signatureSelection) || signatureSelection.length === 0;
-
-  // Build shipment used for rating and (later) purchase
-    const shipment = {
+  // 7) Build shipment used for rating and (later) purchase
+  const shipment = {
     address_from: {
       name: parsedFrom.name || 'Carismo Design',
       company: parsedFrom.company || '',
@@ -1472,21 +1488,33 @@ const requireSignature = !Array.isArray(signatureSelection) || signatureSelectio
     };
   }
 
-  // Service mode
-  const serviceMode = values['service_mode_block']?.['service_mode']?.selected_option?.value || 'default';
+  // 8) Service mode
+  const serviceMode =
+    values['service_mode_block']?.['service_mode']?.selected_option?.value || 'default';
 
-    // Helper to format rates into blocks (list + buttons) – RETURN FLOW
+  // Helper to format rates into blocks (list + buttons) – RETURN FLOW
   function buildRateBlocks(ratesArr) {
     const lines = ratesArr.map((r, idx) => {
-      const provider = r.provider || r.carrier || (r.carrier_account && r.carrier_account.carrier) || 'Unknown';
-      const service  = (r.servicelevel && r.servicelevel.name) || r.servicelevel_name || r.service || 'Unknown';
+      const provider =
+        r.provider || r.carrier || (r.carrier_account && r.carrier_account.carrier) || 'Unknown';
+      const service =
+        (r.servicelevel && r.servicelevel.name) ||
+        r.servicelevel_name ||
+        r.service ||
+        'Unknown';
       const amountNum = r.amount ? Number(r.amount) : null;
-      const price = amountNum != null && !Number.isNaN(amountNum)
-        ? (r.currency === 'USD' ? `$${amountNum.toFixed(2)}` : `${amountNum.toFixed(2)} ${r.currency || ''}`.trim())
-        : 'N/A';
-      const eta = typeof r.estimated_days === 'number'
-        ? `${r.estimated_days} business day${r.estimated_days === 1 ? '' : 's'}`
-        : 'ETA N/A';
+      const price =
+        amountNum != null && !Number.isNaN(amountNum)
+          ? (r.currency === 'USD'
+              ? `$${amountNum.toFixed(2)}`
+              : `${amountNum.toFixed(2)} ${r.currency || ''}`.trim())
+          : 'N/A';
+      const eta =
+        typeof r.estimated_days === 'number'
+          ? `${r.estimated_days} business day${
+              r.estimated_days === 1 ? '' : 's'
+            }`
+          : 'ETA N/A';
       return `${idx + 1}. *${provider}* — ${service} — ${price} — ${eta}`;
     });
 
@@ -1494,8 +1522,13 @@ const requireSignature = !Array.isArray(signatureSelection) || signatureSelectio
 
     // ONE button per actions block to avoid duplicate action_id errors
     for (const r of ratesArr) {
-      const provider = r.provider || r.carrier || (r.carrier_account && r.carrier_account.carrier) || 'Unknown';
-      const service  = (r.servicelevel && r.servicelevel.name) || r.servicelevel_name || r.service || 'Unknown';
+      const provider =
+        r.provider || r.carrier || (r.carrier_account && r.carrier_account.carrier) || 'Unknown';
+      const service =
+        (r.servicelevel && r.servicelevel.name) ||
+        r.servicelevel_name ||
+        r.service ||
+        'Unknown';
       const valuePayload = {
         flow: 'returnlabel',
         channelId,
@@ -1530,187 +1563,240 @@ const requireSignature = !Array.isArray(signatureSelection) || signatureSelectio
       },
       {
         type: 'section',
-        text: { type: 'mrkdwn', text: lines.join('\n') || '_No services available._' }
+        text: {
+          type: 'mrkdwn',
+          text: lines.join('\n') || '_No services available._'
+        }
       },
       ...actionBlocks
     ];
   }
 
-  // Get rates once (used by both branches)
-let rates;
-try {
-  const rated = await createShipmentAndGetRates(shipment, logger);
-  rates = rated.rates || [];
-} catch (e) {
-  await ack(); // close modal
-  try {
-    await client.chat.postEphemeral({
-      channel: ephemeralChannelId,
-      user: ephemeralUserId,
-      text: `❌ Failed to fetch shipping services from Shippo: \`${e?.message || e}\``
-    });
-  } catch {}
-  return;
-}
+  // 9) If user explicitly wants to choose a service, just fetch rates and post the chooser.
+  if (serviceMode === 'choose') {
+    let rates;
+    try {
+      const rated = await createShipmentAndGetRates(shipment, logger);
+      rates = rated.rates || [];
+    } catch (e) {
+      try {
+        await client.chat.postEphemeral({
+          channel: ephemeralChannelId,
+          user: ephemeralUserId,
+          text: `❌ Failed to fetch shipping services from Shippo: \`${e?.message || e}\``
+        });
+      } catch (e2) {
+        log.error?.('Failed to post Shippo error to Slack (choose mode):', e2?.stack || e2?.message || e2);
+      }
+      return;
+    }
 
-if (!Array.isArray(rates) || rates.length === 0) {
-  await ack(); // close modal
-  try {
-    await client.chat.postEphemeral({
-      channel: ephemeralChannelId,
-      user: ephemeralUserId,
-      text: `❌ No shipping services returned for this shipment. Please verify addresses and package dimensions.`
-    });
-  } catch {}
-  return;
-}
+    if (!Array.isArray(rates) || rates.length === 0) {
+      try {
+        await client.chat.postEphemeral({
+          channel: ephemeralChannelId,
+          user: ephemeralUserId,
+          text:
+            '❌ No shipping services returned for this shipment. Please verify addresses and package dimensions.'
+        });
+      } catch (e2) {
+        log.error?.('Failed to post "no services" message (choose mode):', e2?.stack || e2?.message || e2);
+      }
+      return;
+    }
 
-// If user wants to choose, present the options and stop here.
-if (serviceMode === 'choose') {
-  await ack(); // close modal
+    try {
+      await client.chat.postEphemeral({
+        channel: ephemeralChannelId,
+        user: ephemeralUserId,
+        blocks: buildRateBlocks(rates),
+        text: 'Select a shipping service' // fallback
+      });
+    } catch (e2) {
+      log.error?.('Failed to post shipping options (choose mode):', e2?.stack || e2?.message || e2);
+      try {
+        await client.chat.postEphemeral({
+          channel: ephemeralChannelId,
+          user: ephemeralUserId,
+          text: `❌ Failed to post shipping options: \`${e2?.message || e2}\``
+        });
+      } catch {}
+    }
+    return;
+  }
+
+  // 10) Default mode: try UPS Ground (but NOT UPS Ground Saver) first.
+  let rates;
   try {
-    await client.chat.postEphemeral({
-      channel: ephemeralChannelId,
-      user: ephemeralUserId,
-      blocks: buildRateBlocks(rates),
-      text: 'Select a shipping service' // fallback
-    });
+    const rated = await createShipmentAndGetRates(shipment, logger);
+    rates = rated.rates || [];
   } catch (e) {
     try {
       await client.chat.postEphemeral({
         channel: ephemeralChannelId,
         user: ephemeralUserId,
-        text: `❌ Failed to post shipping options: \`${e?.message || e}\``
+        text: `❌ Failed to fetch shipping services from Shippo: \`${e?.message || e}\``
       });
-    } catch {}
+    } catch (e2) {
+      log.error?.('Failed to post Shippo error to Slack (default mode):', e2?.stack || e2?.message || e2);
+    }
+    return;
   }
-  return;
-}
 
-  // Default mode: try UPS Ground (but NOT UPS Ground Saver) first; if missing, fall back to choose flow.
+  if (!Array.isArray(rates) || rates.length === 0) {
+    try {
+      await client.chat.postEphemeral({
+        channel: ephemeralChannelId,
+        user: ephemeralUserId,
+        text:
+          '❌ No shipping services returned for this shipment. Please verify addresses and package dimensions.'
+      });
+    } catch (e2) {
+      log.error?.('Failed to post "no services" message (default mode):', e2?.stack || e2?.message || e2);
+    }
+    return;
+  }
+
   const upsGround = rates.find((r) => {
-    const provider = (r.provider || r.carrier || (r.carrier_account && r.carrier_account.carrier) || '').toLowerCase();
-    const service  = ((r.servicelevel && r.servicelevel.name) || r.servicelevel_name || r.service || '').toLowerCase();
+    const provider =
+      (r.provider || r.carrier || (r.carrier_account && r.carrier_account.carrier) || '').toLowerCase();
+    const service =
+      ((r.servicelevel && r.servicelevel.name) ||
+        r.servicelevel_name ||
+        r.service ||
+        '').toLowerCase();
 
     // Require UPS + "ground" in the service name, but explicitly exclude any "saver" variants.
     return provider === 'ups' && service.includes('ground') && !service.includes('saver');
   });
 
+  // If UPS Ground not available, fall back to the chooser flow using the same helper.
   if (!upsGround) {
-  await ack(); // close modal
-  try {
-    await client.chat.postEphemeral({
-      channel: ephemeralChannelId,
-      user: ephemeralUserId,
-      text: 'UPS Ground not available for this shipment. Please choose a service from the options below.',
-      blocks: buildRateBlocks(rates)
-    });
-  } catch (e) {
     try {
       await client.chat.postEphemeral({
         channel: ephemeralChannelId,
         user: ephemeralUserId,
-        text: `❌ Failed to post shipping options: \`${e?.message || e}\``
+        text:
+          'UPS Ground not available for this shipment. Please choose a service from the options below.',
+        blocks: buildRateBlocks(rates)
       });
-    } catch {}
+    } catch (e2) {
+      log.error?.('Failed to post shipping options fallback (no UPS Ground):', e2?.stack || e2?.message || e2);
+      try {
+        await client.chat.postEphemeral({
+          channel: ephemeralChannelId,
+          user: ephemeralUserId,
+          text: `❌ Failed to post shipping options: \`${e2?.message || e2}\``
+        });
+      } catch {}
+    }
+    return;
   }
-  return;
-}
 
-  // Build review with the preselected UPS Ground
-    const selectedRate = {
+  // 11) We have UPS Ground — buy label immediately and upload the PDF (NO review modal).
+  const selectedRate = {
     id: upsGround.object_id,
-    provider: upsGround.provider || upsGround.carrier || (upsGround.carrier_account && upsGround.carrier_account.carrier) || 'UPS',
-    service: (upsGround.servicelevel && upsGround.servicelevel.name) || upsGround.servicelevel_name || upsGround.service || 'Ground',
+    provider:
+      upsGround.provider ||
+      upsGround.carrier ||
+      (upsGround.carrier_account && upsGround.carrier_account.carrier) ||
+      'UPS',
+    service:
+      (upsGround.servicelevel && upsGround.servicelevel.name) ||
+      upsGround.servicelevel_name ||
+      upsGround.service ||
+      'Ground',
     amount: upsGround.amount || null,
     currency: upsGround.currency || 'USD',
     etaDays: typeof upsGround.estimated_days === 'number' ? upsGround.estimated_days : null
   };
 
-  const priceStr = selectedRate.amount
-    ? (selectedRate.currency === 'USD'
-        ? `$${Number(selectedRate.amount).toFixed(2)}`
-        : `${Number(selectedRate.amount).toFixed(2)} ${selectedRate.currency}`)
-    : 'N/A';
-  const etaStr =
-    selectedRate.etaDays != null
-      ? `${selectedRate.etaDays} business day${selectedRate.etaDays === 1 ? '' : 's'}`
+  let trackingNumber, labelUrl, trackingUrl;
+  let carrierOut = selectedRate.provider || null;
+  let serviceOut = selectedRate.service || null;
+  let etaDaysOut = typeof selectedRate.etaDays === 'number' ? selectedRate.etaDays : null;
+
+  try {
+    const tx = await buyLabelForRate(selectedRate.id, logger);
+    trackingNumber = tx.trackingNumber;
+    labelUrl = tx.labelUrl;
+    trackingUrl = tx.trackingUrl;
+  } catch (e) {
+    const msg = e?.message || String(e);
+    log.error?.('Failed to create Shippo return label (UPS Ground default):', e?.stack || msg);
+    try {
+      await client.chat.postMessage({
+        channel: channelId,
+        text: `❌ Failed to create Shippo return label: \`${msg}\``
+      });
+    } catch {}
+    return;
+  }
+
+  const etaDescription =
+    typeof etaDaysOut === 'number'
+      ? `${etaDaysOut} business day${etaDaysOut === 1 ? '' : 's'} (estimated)`
       : 'N/A';
 
-  const reviewMetadata = JSON.stringify({
-    channelId,
-    shipment,
-    selectedRate
-  });
-
-  const fromLines = [
-    `Name: ${shipment.address_from.name || 'N/A'}`,
-    `Company: ${shipment.address_from.company || 'N/A'}`,
-    `Street: ${shipment.address_from.street1 || 'N/A'}`,
-    `Street 2: ${shipment.address_from.street2 || 'N/A'}`,
-    `City: ${shipment.address_from.city || 'N/A'}`,
-    `State: ${shipment.address_from.state || 'N/A'}`,
-    `ZIP: ${shipment.address_from.zip || 'N/A'}`
-  ];
-
-  const toLines = [
-    `Name: ${shipment.address_to.name || 'N/A'}`,
-    `Company: ${shipment.address_to.company || 'N/A'}`,
-    `Street: ${shipment.address_to.street1 || 'N/A'}`,
-    `Street 2: ${shipment.address_to.street2 || 'N/A'}`,
-    `City: ${shipment.address_to.city || 'N/A'}`,
-    `State: ${shipment.address_to.state || 'N/A'}`,
-    `ZIP: ${shipment.address_to.zip || 'N/A'}`
-  ];
-
-  const parcelLines = [
-    `${parcelLength}" x ${parcelWidth}" x ${parcelHeight}" (${parcelWeight} lb)`
-  ];
-
-  const serviceLines = [
-    `${selectedRate.provider} — ${selectedRate.service} — ${priceStr} — ETA: ${etaStr}`
-  ];
-
-  await ack({
-    response_action: 'update',
-    view: {
-      type: 'modal',
-      callback_id: 'returnlabel_review_modal',
-      private_metadata: reviewMetadata,
-      title: { type: 'plain_text', text: 'Review Return Label Details', emoji: true },
-      submit: { type: 'plain_text', text: 'Create Label', emoji: true },
-      close:  { type: 'plain_text', text: 'Back', emoji: true },
-            blocks: [
-        { type: 'section', text: { type: 'mrkdwn', text: 'Please review the details below.' } },
-        { type: 'divider' },
-
-        /* Ship From section */
-        { type: 'section', text: { type: 'mrkdwn', text: '*Ship From Address*' } },
-        { type: 'section', text: { type: 'mrkdwn', text: fromLines.join('\n') } },
-
-        { type: 'divider' },
-        { type: 'divider' },
-
-        /* Ship To section */
-        { type: 'section', text: { type: 'mrkdwn', text: '*Ship To Address*' } },
-        { type: 'section', text: { type: 'mrkdwn', text: toLines.join('\n') } },
-
-        { type: 'divider' },
-        { type: 'divider' },
-
-        /* Package section */
-        { type: 'section', text: { type: 'mrkdwn', text: '*Package Info*' } },
-        { type: 'section', text: { type: 'mrkdwn', text: parcelLines.join('\n') } },
-
-        { type: 'divider' },
-        { type: 'divider' },
-
-        /* Service section */
-        { type: 'section', text: { type: 'mrkdwn', text: '*Shipping Service*' } },
-        { type: 'section', text: { type: 'mrkdwn', text: serviceLines.join('\n') } }
-      ]
+  // 12) Download the PDF from Shippo
+  let pdfBuffer;
+  try {
+    const pdfRes = await fetch(labelUrl);
+    if (!pdfRes.ok) {
+      const txt = await pdfRes.text();
+      throw new Error(`Download failed ${pdfRes.status}: ${txt}`);
     }
-  });
+    const pdfArrayBuf = await pdfRes.arrayBuffer();
+    pdfBuffer = Buffer.from(pdfArrayBuf);
+  } catch (e) {
+    const msg = e?.message || String(e);
+    log.error?.('Failed to download Shippo return label PDF:', e?.stack || msg);
+    try {
+      await client.chat.postMessage({
+        channel: channelId,
+        text:
+          `✅ Created Shippo return label, but failed to download the PDF.\n` +
+          `*Tracking number:* ${trackingNumber || 'N/A'}\n` +
+          `*Carrier:* ${carrierOut || 'N/A'}\n` +
+          `*Service:* ${serviceOut || 'N/A'}\n` +
+          `*ETA:* ${etaDescription}\n` +
+          `Tracking URL: ${trackingUrl || 'N/A'}\n` +
+          `Error downloading PDF: \`${msg}\``
+      });
+    } catch {}
+    return;
+  }
+
+  // 13) Upload the PDF into Slack
+  try {
+    await client.files.uploadV2({
+      channel_id: channelId,
+      filename: 'return-label.pdf',
+      file: pdfBuffer,
+      initial_comment:
+        `📦 *Return label created*\n` +
+        `• *Tracking number:* ${trackingNumber || 'N/A'}\n` +
+        `• *Carrier:* ${carrierOut || 'N/A'}\n` +
+        `• *Service:* ${serviceOut || 'N/A'}\n` +
+        `• *ETA:* ${etaDescription}`
+    });
+  } catch (e) {
+    const msg = e?.message || String(e);
+    log.error?.('Failed to upload return label PDF to Slack:', e?.stack || msg);
+    try {
+      await client.chat.postMessage({
+        channel: channelId,
+        text:
+          `✅ Created Shippo return label, but failed to upload the PDF to Slack.\n` +
+          `*Tracking number:* ${trackingNumber || 'N/A'}\n` +
+          `*Carrier:* ${carrierOut || 'N/A'}\n` +
+          `*Service:* ${serviceOut || 'N/A'}\n` +
+          `*ETA:* ${etaDescription}\n` +
+          `Tracking URL: ${trackingUrl || 'N/A'}\n` +
+          `Upload error: \`${msg}\``
+      });
+    } catch {}
+  }
 });
 
 /**
