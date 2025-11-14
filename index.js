@@ -495,7 +495,7 @@ slackApp.command('/shippinglabel', async ({ ack, body, client, logger }) => {
         private_metadata: privateMetadata,
         title: {
           type: 'plain_text',
-          text: 'Shipping Label – Edit',
+          text: 'Create Shipping Label',
           emoji: true
         },
         submit: {
@@ -509,13 +509,15 @@ slackApp.command('/shippinglabel', async ({ ack, body, client, logger }) => {
           emoji: true
         },
         blocks: [
+          /* Ship To section heading */
           {
             type: 'section',
             text: {
               type: 'mrkdwn',
-              text: 'Configure the shipping label details, then click *Next*.'
+              text: '*Ship To Address*'
             }
           },
+          { type: 'divider' },
           { type: 'divider' },
 
           /* Ship To (required, multi-line, no default option) */
@@ -528,17 +530,32 @@ slackApp.command('/shippinglabel', async ({ ack, body, client, logger }) => {
               action_id: 'to_address_multiline',
               multiline: true
             },
-            hint: { type: 'plain_text', text: 'Lines: Name, Company (optional), Street, City, ST ZIP' },
+            hint: {
+              type: 'plain_text',
+              text: 'Lines: Name, Company (optional), Street 1, Street 2 (Optional), City, ST ZIP.'
+            },
             optional: false
           },
 
+          { type: 'divider' },
+          { type: 'divider' },
+
+          /* Ship From section heading */
+          {
+            type: 'section',
+            text: {
+              type: 'mrkdwn',
+              text: '*Ship From Address*'
+            }
+          },
+          { type: 'divider' },
           { type: 'divider' },
 
           /* Ship From Mode (Carismo default with optional custom override) */
           {
             type: 'section',
             block_id: 'from_address_mode_block',
-            text: { type: 'mrkdwn', text: '*Ship From address*' },
+            text: { type: 'mrkdwn', text: '*Ship From mode*' },
             accessory: {
               type: 'radio_buttons',
               action_id: 'from_address_mode',
@@ -561,24 +578,39 @@ slackApp.command('/shippinglabel', async ({ ack, body, client, logger }) => {
           {
             type: 'input',
             block_id: 'from_address_multiline_block',
-            label: { type: 'plain_text', text: 'Ship From (multi-line address)', emoji: true },
+            label: { type: 'plain_text', text: 'Custom Ship From (multi-line)', emoji: true },
             element: {
               type: 'plain_text_input',
               action_id: 'from_address_multiline',
               multiline: true,
               initial_value: ''
             },
-            hint: { type: 'plain_text', text: 'Lines: Name, Company (optional), Street, City, ST ZIP' },
+            hint: {
+              type: 'plain_text',
+              text: 'Lines: Name, Company (optional), Street 1, Street 2 (Optional), City, ST ZIP.'
+            },
             optional: true
           },
 
+          { type: 'divider' },
+          { type: 'divider' },
+
+          /* Package section heading */
+          {
+            type: 'section',
+            text: {
+              type: 'mrkdwn',
+              text: '*Package Info*'
+            }
+          },
+          { type: 'divider' },
           { type: 'divider' },
 
           /* Package Mode (same as /returnlabel) */
           {
             type: 'section',
             block_id: 'parcel_mode_block',
-            text: { type: 'mrkdwn', text: '*Package info*' },
+            text: { type: 'mrkdwn', text: '*Package mode*' },
             accessory: {
               type: 'radio_buttons',
               action_id: 'parcel_mode',
@@ -592,7 +624,7 @@ slackApp.command('/shippinglabel', async ({ ack, body, client, logger }) => {
                   value: 'default'
                 },
                 {
-                  text: { type: 'plain_text', text: 'Enter custom package info', emoji: true },
+                  text: { type: 'plain_text', text: 'Enter custom package dimensions', emoji: true },
                   value: 'custom'
                 }
               ]
@@ -601,39 +633,51 @@ slackApp.command('/shippinglabel', async ({ ack, body, client, logger }) => {
           {
             type: 'input',
             block_id: 'parcel_length_block',
-            label: { type: 'plain_text', text: 'Parcel Length (in)', emoji: true },
+            label: { type: 'plain_text', text: 'Custom Package Length (in)', emoji: true },
             element: { type: 'plain_text_input', action_id: 'parcel_length', initial_value: '' },
             optional: true
           },
           {
             type: 'input',
             block_id: 'parcel_width_block',
-            label: { type: 'plain_text', text: 'Parcel Width (in)', emoji: true },
+            label: { type: 'plain_text', text: 'Custom Package Width (in)', emoji: true },
             element: { type: 'plain_text_input', action_id: 'parcel_width', initial_value: '' },
             optional: true
           },
           {
             type: 'input',
             block_id: 'parcel_height_block',
-            label: { type: 'plain_text', text: 'Parcel Height (in)', emoji: true },
+            label: { type: 'plain_text', text: 'Custom Package Height (in)', emoji: true },
             element: { type: 'plain_text_input', action_id: 'parcel_height', initial_value: '' },
             optional: true
           },
           {
             type: 'input',
             block_id: 'parcel_weight_block',
-            label: { type: 'plain_text', text: 'Parcel Weight (lb)', emoji: true },
+            label: { type: 'plain_text', text: 'Custom Package Weight (lb)', emoji: true },
             element: { type: 'plain_text_input', action_id: 'parcel_weight', initial_value: '' },
             optional: true
           },
 
+          { type: 'divider' },
+          { type: 'divider' },
+
+          /* Shipping Service section heading */
+          {
+            type: 'section',
+            text: {
+              type: 'mrkdwn',
+              text: '*Shipping Service*'
+            }
+          },
+          { type: 'divider' },
           { type: 'divider' },
 
           /* Shipping Service Mode + Signature checkbox (same behavior as /returnlabel) */
           {
             type: 'section',
             block_id: 'service_mode_block',
-            text: { type: 'mrkdwn', text: '*Shipping service*' },
+            text: { type: 'mrkdwn', text: '*Service mode*' },
             accessory: {
               type: 'radio_buttons',
               action_id: 'service_mode',
@@ -658,7 +702,7 @@ slackApp.command('/shippinglabel', async ({ ack, body, client, logger }) => {
             block_id: 'signature_block',
             label: {
               type: 'plain_text',
-              text: 'Signature requirement',
+              text: 'Remove Signature Requirement?',
               emoji: true
             },
             element: {
@@ -668,7 +712,7 @@ slackApp.command('/shippinglabel', async ({ ack, body, client, logger }) => {
                 {
                   text: {
                     type: 'plain_text',
-                    text: 'Check to NOT require signature (signature required by default)',
+                    text: 'Check to REMOVE signature requirement (required by default)',
                     emoji: true
                   },
                   value: 'no_signature'
@@ -690,7 +734,7 @@ slackApp.command('/shippinglabel', async ({ ack, body, client, logger }) => {
  * Now:
  *  - Acks promptly
  *  - Logs command usage into ./data/commands-log.json
- *  - Opens an "Edit Details" modal with address + package + shipping service mode
+ *  - Opens a "Create Return Label" modal with address + package + shipping service mode
  */
 slackApp.command('/returnlabel', async ({ ack, body, client, logger }) => {
   await ack();
@@ -714,11 +758,11 @@ slackApp.command('/returnlabel', async ({ ack, body, client, logger }) => {
     logger?.warn?.('Failed to log /returnlabel command:', e);
   }
 
-const privateMetadata = JSON.stringify({
-  channelId: targetChannel,
-  userChannelId: body.channel_id,
-  userId: body.user_id
-});
+  const privateMetadata = JSON.stringify({
+    channelId: targetChannel,
+    userChannelId: body.channel_id,
+    userId: body.user_id
+  });
 
   try {
     await client.views.open({
@@ -729,7 +773,7 @@ const privateMetadata = JSON.stringify({
         private_metadata: privateMetadata,
         title: {
           type: 'plain_text',
-          text: 'Return Label – Edit',
+          text: 'Create Return Label',
           emoji: true
         },
         submit: {
@@ -743,20 +787,22 @@ const privateMetadata = JSON.stringify({
           emoji: true
         },
         blocks: [
+          /* Ship From section heading */
           {
             type: 'section',
             text: {
               type: 'mrkdwn',
-              text: 'Configure the return label details, then click *Next*.'
+              text: '*Ship From Address*'
             }
           },
+          { type: 'divider' },
           { type: 'divider' },
 
           /* Ship From Mode */
           {
             type: 'section',
             block_id: 'from_address_mode_block',
-            text: { type: 'mrkdwn', text: '*Ship From address*' },
+            text: { type: 'mrkdwn', text: '*Ship From mode*' },
             accessory: {
               type: 'radio_buttons',
               action_id: 'from_address_mode',
@@ -777,34 +823,43 @@ const privateMetadata = JSON.stringify({
             }
           },
           {
-  type: 'input',
-  block_id: 'from_address_multiline_block',
-  label: { type: 'plain_text', text: 'Ship From (multi-line address)', emoji: true },
-  element: {
-    type: 'plain_text_input',
-    action_id: 'from_address_multiline',
-    multiline: true,
-    initial_value: ''
-  },
-  hint: { type: 'plain_text', text: 'Lines: Name, Company (optional), Street, City, ST ZIP' },
-  optional: true
-},
+            type: 'input',
+            block_id: 'from_address_multiline_block',
+            label: { type: 'plain_text', text: 'Custom Ship From (multi-line)', emoji: true },
+            element: {
+              type: 'plain_text_input',
+              action_id: 'from_address_multiline',
+              multiline: true,
+              initial_value: ''
+            },
+            hint: {
+              type: 'plain_text',
+              text: 'Lines: Name, Company (optional), Street 1, Street 2 (Optional), City, ST ZIP.'
+            },
+            optional: true
+          },
 
-          /* Ship To (fixed) */
+          /* (Ship To fixed is hidden from the UI but still used in the backend) */
+
+          { type: 'divider' },
+          { type: 'divider' },
+
+          /* Package section heading */
           {
             type: 'section',
             text: {
               type: 'mrkdwn',
-              text: '*Ship To (fixed):*\n```' + DEFAULT_TO_ADDRESS_TEXT + '```'
+              text: '*Package Info*'
             }
           },
+          { type: 'divider' },
           { type: 'divider' },
 
           /* Package Mode */
           {
             type: 'section',
             block_id: 'parcel_mode_block',
-            text: { type: 'mrkdwn', text: '*Package info*' },
+            text: { type: 'mrkdwn', text: '*Package mode*' },
             accessory: {
               type: 'radio_buttons',
               action_id: 'parcel_mode',
@@ -818,48 +873,60 @@ const privateMetadata = JSON.stringify({
                   value: 'default'
                 },
                 {
-                  text: { type: 'plain_text', text: 'Enter custom package info', emoji: true },
+                  text: { type: 'plain_text', text: 'Enter custom package dimensions', emoji: true },
                   value: 'custom'
                 }
               ]
             }
           },
           {
-  type: 'input',
-  block_id: 'parcel_length_block',
-  label: { type: 'plain_text', text: 'Parcel Length (in)', emoji: true },
-  element: { type: 'plain_text_input', action_id: 'parcel_length', initial_value: '' },
-  optional: true
-},
-{
-  type: 'input',
-  block_id: 'parcel_width_block',
-  label: { type: 'plain_text', text: 'Parcel Width (in)', emoji: true },
-  element: { type: 'plain_text_input', action_id: 'parcel_width', initial_value: '' },
-  optional: true
-},
-{
-  type: 'input',
-  block_id: 'parcel_height_block',
-  label: { type: 'plain_text', text: 'Parcel Height (in)', emoji: true },
-  element: { type: 'plain_text_input', action_id: 'parcel_height', initial_value: '' },
-  optional: true
-},
-{
-  type: 'input',
-  block_id: 'parcel_weight_block',
-  label: { type: 'plain_text', text: 'Parcel Weight (lb)', emoji: true },
-  element: { type: 'plain_text_input', action_id: 'parcel_weight', initial_value: '' },
-  optional: true
-},
+            type: 'input',
+            block_id: 'parcel_length_block',
+            label: { type: 'plain_text', text: 'Custom Package Length (in)', emoji: true },
+            element: { type: 'plain_text_input', action_id: 'parcel_length', initial_value: '' },
+            optional: true
+          },
+          {
+            type: 'input',
+            block_id: 'parcel_width_block',
+            label: { type: 'plain_text', text: 'Custom Package Width (in)', emoji: true },
+            element: { type: 'plain_text_input', action_id: 'parcel_width', initial_value: '' },
+            optional: true
+          },
+          {
+            type: 'input',
+            block_id: 'parcel_height_block',
+            label: { type: 'plain_text', text: 'Custom Package Height (in)', emoji: true },
+            element: { type: 'plain_text_input', action_id: 'parcel_height', initial_value: '' },
+            optional: true
+          },
+          {
+            type: 'input',
+            block_id: 'parcel_weight_block',
+            label: { type: 'plain_text', text: 'Custom Package Weight (lb)', emoji: true },
+            element: { type: 'plain_text_input', action_id: 'parcel_weight', initial_value: '' },
+            optional: true
+          },
 
+          { type: 'divider' },
+          { type: 'divider' },
+
+          /* Shipping Service section heading */
+          {
+            type: 'section',
+            text: {
+              type: 'mrkdwn',
+              text: '*Shipping Service*'
+            }
+          },
+          { type: 'divider' },
           { type: 'divider' },
 
           /* Shipping Service Mode */
-                    {
+          {
             type: 'section',
             block_id: 'service_mode_block',
-            text: { type: 'mrkdwn', text: '*Shipping service*' },
+            text: { type: 'mrkdwn', text: '*Service mode*' },
             accessory: {
               type: 'radio_buttons',
               action_id: 'service_mode',
@@ -884,7 +951,7 @@ const privateMetadata = JSON.stringify({
             block_id: 'signature_block',
             label: {
               type: 'plain_text',
-              text: 'Signature requirement',
+              text: 'Remove Signature Requirement?',
               emoji: true
             },
             element: {
@@ -894,7 +961,7 @@ const privateMetadata = JSON.stringify({
                 {
                   text: {
                     type: 'plain_text',
-                    text: 'Check to NOT require signature (signature required by default)',
+                    text: 'Check to REMOVE signature requirement (required by default)',
                     emoji: true
                   },
                   value: 'no_signature'
@@ -1203,7 +1270,7 @@ slackApp.view('shippinglabel_edit_modal', async ({ ack, body, view, client, logg
   }
 
   // Build review with the preselected UPS Ground
-  const selectedRate = {
+    const selectedRate = {
     id: upsGround.object_id,
     provider: upsGround.provider || upsGround.carrier || (upsGround.carrier_account && upsGround.carrier_account.carrier) || 'UPS',
     service: (upsGround.servicelevel && upsGround.servicelevel.name) || upsGround.servicelevel_name || upsGround.service || 'Ground',
@@ -1213,9 +1280,14 @@ slackApp.view('shippinglabel_edit_modal', async ({ ack, body, view, client, logg
   };
 
   const priceStr = selectedRate.amount
-    ? (selectedRate.currency === 'USD' ? `$${Number(selectedRate.amount).toFixed(2)}` : `${Number(selectedRate.amount).toFixed(2)} ${selectedRate.currency}`)
+    ? (selectedRate.currency === 'USD'
+        ? `$${Number(selectedRate.amount).toFixed(2)}`
+        : `${Number(selectedRate.amount).toFixed(2)} ${selectedRate.currency}`)
     : 'N/A';
-  const etaStr = selectedRate.etaDays != null ? `${selectedRate.etaDays} business day${selectedRate.etaDays === 1 ? '' : 's'}` : 'N/A';
+  const etaStr =
+    selectedRate.etaDays != null
+      ? `${selectedRate.etaDays} business day${selectedRate.etaDays === 1 ? '' : 's'}`
+      : 'N/A';
 
   const reviewMetadata = JSON.stringify({
     channelId,
@@ -1223,46 +1295,70 @@ slackApp.view('shippinglabel_edit_modal', async ({ ack, body, view, client, logg
     selectedRate
   });
 
-  const reviewTextLines = [
-    '*Ship From (parsed):*',
+  const fromLines = [
     `Name: ${shipment.address_from.name || 'N/A'}`,
     `Company: ${shipment.address_from.company || 'N/A'}`,
     `Street: ${shipment.address_from.street1 || 'N/A'}`,
     `Street 2: ${shipment.address_from.street2 || 'N/A'}`,
     `City: ${shipment.address_from.city || 'N/A'}`,
     `State: ${shipment.address_from.state || 'N/A'}`,
-    `ZIP: ${shipment.address_from.zip || 'N/A'}`,
-    '',
-    '*Ship To (parsed):*',
+    `ZIP: ${shipment.address_from.zip || 'N/A'}`
+  ];
+
+  const toLines = [
     `Name: ${shipment.address_to.name || 'N/A'}`,
     `Company: ${shipment.address_to.company || 'N/A'}`,
     `Street: ${shipment.address_to.street1 || 'N/A'}`,
     `Street 2: ${shipment.address_to.street2 || 'N/A'}`,
     `City: ${shipment.address_to.city || 'N/A'}`,
     `State: ${shipment.address_to.state || 'N/A'}`,
-    `ZIP: ${shipment.address_to.zip || 'N/A'}`,
-    '',
-    '*Parcel:*',
-    `${parcelLength}" x ${parcelWidth}" x ${parcelHeight}" (${parcelWeight} lb)`,
-    '',
-    '*Shipping Service:*',
+    `ZIP: ${shipment.address_to.zip || 'N/A'}`
+  ];
+
+  const parcelLines = [
+    `${shipment.parcels[0].length}" x ${shipment.parcels[0].width}" x ${shipment.parcels[0].height}" (${shipment.parcels[0].weight} lb)`
+  ];
+
+  const serviceLines = [
     `${selectedRate.provider} — ${selectedRate.service} — ${priceStr} — ETA: ${etaStr}`
   ];
 
-  // Update to review modal with selected UPS Ground
   await ack({
     response_action: 'update',
     view: {
       type: 'modal',
       callback_id: 'shippinglabel_review_modal',
       private_metadata: reviewMetadata,
-      title: { type: 'plain_text', text: 'Shipping Label – Review', emoji: true },
+      title: { type: 'plain_text', text: 'Review Shipping Label Details', emoji: true },
       submit: { type: 'plain_text', text: 'Create Label', emoji: true },
       close:  { type: 'plain_text', text: 'Back', emoji: true },
       blocks: [
         { type: 'section', text: { type: 'mrkdwn', text: 'Please review the details below.' } },
         { type: 'divider' },
-        { type: 'section', text: { type: 'mrkdwn', text: reviewTextLines.join('\n') } }
+
+        /* Ship From section */
+        { type: 'section', text: { type: 'mrkdwn', text: '*Ship From Address*' } },
+        { type: 'divider' },
+        { type: 'divider' },
+        { type: 'section', text: { type: 'mrkdwn', text: fromLines.join('\n') } },
+
+        /* Ship To section */
+        { type: 'section', text: { type: 'mrkdwn', text: '*Ship To Address*' } },
+        { type: 'divider' },
+        { type: 'divider' },
+        { type: 'section', text: { type: 'mrkdwn', text: toLines.join('\n') } },
+
+        /* Package section */
+        { type: 'section', text: { type: 'mrkdwn', text: '*Package Info*' } },
+        { type: 'divider' },
+        { type: 'divider' },
+        { type: 'section', text: { type: 'mrkdwn', text: parcelLines.join('\n') } },
+
+        /* Service section */
+        { type: 'section', text: { type: 'mrkdwn', text: '*Shipping Service*' } },
+        { type: 'divider' },
+        { type: 'divider' },
+        { type: 'section', text: { type: 'mrkdwn', text: serviceLines.join('\n') } }
       ]
     }
   });
@@ -1549,7 +1645,7 @@ if (serviceMode === 'choose') {
 }
 
   // Build review with the preselected UPS Ground
-  const selectedRate = {
+    const selectedRate = {
     id: upsGround.object_id,
     provider: upsGround.provider || upsGround.carrier || (upsGround.carrier_account && upsGround.carrier_account.carrier) || 'UPS',
     service: (upsGround.servicelevel && upsGround.servicelevel.name) || upsGround.servicelevel_name || upsGround.service || 'Ground',
@@ -1559,9 +1655,14 @@ if (serviceMode === 'choose') {
   };
 
   const priceStr = selectedRate.amount
-    ? (selectedRate.currency === 'USD' ? `$${Number(selectedRate.amount).toFixed(2)}` : `${Number(selectedRate.amount).toFixed(2)} ${selectedRate.currency}`)
+    ? (selectedRate.currency === 'USD'
+        ? `$${Number(selectedRate.amount).toFixed(2)}`
+        : `${Number(selectedRate.amount).toFixed(2)} ${selectedRate.currency}`)
     : 'N/A';
-  const etaStr = selectedRate.etaDays != null ? `${selectedRate.etaDays} business day${selectedRate.etaDays === 1 ? '' : 's'}` : 'N/A';
+  const etaStr =
+    selectedRate.etaDays != null
+      ? `${selectedRate.etaDays} business day${selectedRate.etaDays === 1 ? '' : 's'}`
+      : 'N/A';
 
   const reviewMetadata = JSON.stringify({
     channelId,
@@ -1569,46 +1670,70 @@ if (serviceMode === 'choose') {
     selectedRate
   });
 
-  const reviewTextLines = [
-  '*Ship From (parsed):*',
-  `Name: ${shipment.address_from.name || 'N/A'}`,
-  `Company: ${shipment.address_from.company || 'N/A'}`,
-  `Street: ${shipment.address_from.street1 || 'N/A'}`,
-  `Street 2: ${shipment.address_from.street2 || 'N/A'}`,
-  `City: ${shipment.address_from.city || 'N/A'}`,
-  `State: ${shipment.address_from.state || 'N/A'}`,
-  `ZIP: ${shipment.address_from.zip || 'N/A'}`,
-  '',
-  '*Ship To (parsed):*',
-  `Name: ${shipment.address_to.name || 'N/A'}`,
-  `Company: ${shipment.address_to.company || 'N/A'}`,
-  `Street: ${shipment.address_to.street1 || 'N/A'}`,
-  `Street 2: ${shipment.address_to.street2 || 'N/A'}`,
-  `City: ${shipment.address_to.city || 'N/A'}`,
-  `State: ${shipment.address_to.state || 'N/A'}`,
-  `ZIP: ${shipment.address_to.zip || 'N/A'}`,
-  '',
-  '*Parcel:*',
-  `${parcelLength}" x ${parcelWidth}" x ${parcelHeight}" (${parcelWeight} lb)`,
-  '',
-  '*Shipping Service:*',
-  `${selectedRate.provider} — ${selectedRate.service} — ${priceStr} — ETA: ${etaStr}`
-];
+  const fromLines = [
+    `Name: ${shipment.address_from.name || 'N/A'}`,
+    `Company: ${shipment.address_from.company || 'N/A'}`,
+    `Street: ${shipment.address_from.street1 || 'N/A'}`,
+    `Street 2: ${shipment.address_from.street2 || 'N/A'}`,
+    `City: ${shipment.address_from.city || 'N/A'}`,
+    `State: ${shipment.address_from.state || 'N/A'}`,
+    `ZIP: ${shipment.address_from.zip || 'N/A'}`
+  ];
 
-  // Update to review modal with selected UPS Ground
+  const toLines = [
+    `Name: ${shipment.address_to.name || 'N/A'}`,
+    `Company: ${shipment.address_to.company || 'N/A'}`,
+    `Street: ${shipment.address_to.street1 || 'N/A'}`,
+    `Street 2: ${shipment.address_to.street2 || 'N/A'}`,
+    `City: ${shipment.address_to.city || 'N/A'}`,
+    `State: ${shipment.address_to.state || 'N/A'}`,
+    `ZIP: ${shipment.address_to.zip || 'N/A'}`
+  ];
+
+  const parcelLines = [
+    `${parcelLength}" x ${parcelWidth}" x ${parcelHeight}" (${parcelWeight} lb)`
+  ];
+
+  const serviceLines = [
+    `${selectedRate.provider} — ${selectedRate.service} — ${priceStr} — ETA: ${etaStr}`
+  ];
+
   await ack({
     response_action: 'update',
     view: {
       type: 'modal',
       callback_id: 'returnlabel_review_modal',
       private_metadata: reviewMetadata,
-      title: { type: 'plain_text', text: 'Return Label – Review', emoji: true },
+      title: { type: 'plain_text', text: 'Review Return Label Details', emoji: true },
       submit: { type: 'plain_text', text: 'Create Label', emoji: true },
       close:  { type: 'plain_text', text: 'Back', emoji: true },
       blocks: [
         { type: 'section', text: { type: 'mrkdwn', text: 'Please review the details below.' } },
         { type: 'divider' },
-        { type: 'section', text: { type: 'mrkdwn', text: reviewTextLines.join('\n') } }
+
+        /* Ship From section */
+        { type: 'section', text: { type: 'mrkdwn', text: '*Ship From Address*' } },
+        { type: 'divider' },
+        { type: 'divider' },
+        { type: 'section', text: { type: 'mrkdwn', text: fromLines.join('\n') } },
+
+        /* Ship To section */
+        { type: 'section', text: { type: 'mrkdwn', text: '*Ship To Address*' } },
+        { type: 'divider' },
+        { type: 'divider' },
+        { type: 'section', text: { type: 'mrkdwn', text: toLines.join('\n') } },
+
+        /* Package section */
+        { type: 'section', text: { type: 'mrkdwn', text: '*Package Info*' } },
+        { type: 'divider' },
+        { type: 'divider' },
+        { type: 'section', text: { type: 'mrkdwn', text: parcelLines.join('\n') } },
+
+        /* Service section */
+        { type: 'section', text: { type: 'mrkdwn', text: '*Shipping Service*' } },
+        { type: 'divider' },
+        { type: 'divider' },
+        { type: 'section', text: { type: 'mrkdwn', text: serviceLines.join('\n') } }
       ]
     }
   });
@@ -1639,9 +1764,14 @@ slackApp.action('service_option_select', async ({ ack, body, client, logger }) =
   const { channelId, shipment, selectedRate } = payload;
 
   const priceStr = selectedRate.amount
-    ? (selectedRate.currency === 'USD' ? `$${Number(selectedRate.amount).toFixed(2)}` : `${Number(selectedRate.amount).toFixed(2)} ${selectedRate.currency}`)
+    ? (selectedRate.currency === 'USD'
+        ? `$${Number(selectedRate.amount).toFixed(2)}`
+        : `${Number(selectedRate.amount).toFixed(2)} ${selectedRate.currency}`)
     : 'N/A';
-  const etaStr = selectedRate.etaDays != null ? `${selectedRate.etaDays} business day${selectedRate.etaDays === 1 ? '' : 's'}` : 'N/A';
+  const etaStr =
+    selectedRate.etaDays != null
+      ? `${selectedRate.etaDays} business day${selectedRate.etaDays === 1 ? '' : 's'}`
+      : 'N/A';
 
   const reviewMetadata = JSON.stringify({
     channelId,
@@ -1649,36 +1779,40 @@ slackApp.action('service_option_select', async ({ ack, body, client, logger }) =
     selectedRate
   });
 
-  const reviewTextLines = [
-    '*Ship From (parsed):*',
+  const fromLines = [
     `Name: ${shipment.address_from.name || 'N/A'}`,
     `Company: ${shipment.address_from.company || 'N/A'}`,
     `Street: ${shipment.address_from.street1 || 'N/A'}`,
     `Street 2: ${shipment.address_from.street2 || 'N/A'}`,
     `City: ${shipment.address_from.city || 'N/A'}`,
     `State: ${shipment.address_from.state || 'N/A'}`,
-    `ZIP: ${shipment.address_from.zip || 'N/A'}`,
-    '',
-    '*Ship To (parsed):*',
+    `ZIP: ${shipment.address_from.zip || 'N/A'}`
+  ];
+
+  const toLines = [
     `Name: ${shipment.address_to.name || 'N/A'}`,
     `Company: ${shipment.address_to.company || 'N/A'}`,
     `Street: ${shipment.address_to.street1 || 'N/A'}`,
     `Street 2: ${shipment.address_to.street2 || 'N/A'}`,
     `City: ${shipment.address_to.city || 'N/A'}`,
     `State: ${shipment.address_to.state || 'N/A'}`,
-    `ZIP: ${shipment.address_to.zip || 'N/A'}`,
-    '',
-    '*Parcel:*',
-    `${shipment.parcels[0].length}" x ${shipment.parcels[0].width}" x ${shipment.parcels[0].height}" (${shipment.parcels[0].weight} lb)`,
-    '',
-    '*Shipping Service:*',
+    `ZIP: ${shipment.address_to.zip || 'N/A'}`
+  ];
+
+  const parcelLines = [
+    `${shipment.parcels[0].length}" x ${shipment.parcels[0].width}" x ${shipment.parcels[0].height}" (${shipment.parcels[0].weight} lb)`
+  ];
+
+  const serviceLines = [
     `${selectedRate.provider} — ${selectedRate.service} — ${priceStr} — ETA: ${etaStr}`
   ];
 
   const reviewCallbackId =
     flow === 'shippinglabel' ? 'shippinglabel_review_modal' : 'returnlabel_review_modal';
   const reviewTitleText =
-    flow === 'shippinglabel' ? 'Shipping Label – Review' : 'Return Label – Review';
+    flow === 'shippinglabel'
+      ? 'Review Shipping Label Details'
+      : 'Review Return Label Details';
 
   try {
     await client.views.open({
@@ -1693,7 +1827,30 @@ slackApp.action('service_option_select', async ({ ack, body, client, logger }) =
         blocks: [
           { type: 'section', text: { type: 'mrkdwn', text: 'Please review the details below.' } },
           { type: 'divider' },
-          { type: 'section', text: { type: 'mrkdwn', text: reviewTextLines.join('\n') } }
+
+          /* Ship From section */
+          { type: 'section', text: { type: 'mrkdwn', text: '*Ship From Address*' } },
+          { type: 'divider' },
+          { type: 'divider' },
+          { type: 'section', text: { type: 'mrkdwn', text: fromLines.join('\n') } },
+
+          /* Ship To section */
+          { type: 'section', text: { type: 'mrkdwn', text: '*Ship To Address*' } },
+          { type: 'divider' },
+          { type: 'divider' },
+          { type: 'section', text: { type: 'mrkdwn', text: toLines.join('\n') } },
+
+          /* Package section */
+          { type: 'section', text: { type: 'mrkdwn', text: '*Package Info*' } },
+          { type: 'divider' },
+          { type: 'divider' },
+          { type: 'section', text: { type: 'mrkdwn', text: parcelLines.join('\n') } },
+
+          /* Service section */
+          { type: 'section', text: { type: 'mrkdwn', text: '*Shipping Service*' } },
+          { type: 'divider' },
+          { type: 'divider' },
+          { type: 'section', text: { type: 'mrkdwn', text: serviceLines.join('\n') } }
         ]
       }
     });
