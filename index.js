@@ -84,6 +84,13 @@ Carismo Design
 71 Winant Place (Suite B)
 Staten Island, NY 10309`;
 
+const DEFAULT_PARCEL = {
+  length: '17',
+  width: '17',
+  height: '7',
+  weight: '8'
+};
+
 /**
  * Very simple US multi-line address parser.
  * Expects lines like:
@@ -354,7 +361,7 @@ slackApp.command('/shippinglabel', async ({ ack, body, client, logger }) => {
  * Now:
  *  - Acks promptly
  *  - Logs command usage into ./data/commands-log.json
- *  - Opens an "Edit Details" modal with test defaults
+ *  - Opens an "Edit Details" modal with address + package defaults
  */
 slackApp.command('/returnlabel', async ({ ack, body, client, logger }) => {
   await ack();
@@ -404,7 +411,7 @@ slackApp.command('/returnlabel', async ({ ack, body, client, logger }) => {
           text: 'Cancel',
           emoji: true
         },
-                blocks: [
+        blocks: [
           {
             type: 'section',
             text: {
@@ -470,7 +477,8 @@ slackApp.command('/returnlabel', async ({ ack, body, client, logger }) => {
             hint: {
               type: 'plain_text',
               text: 'Example lines: Name, Company (optional), Street, City, ST ZIP'
-            }
+            },
+            optional: true
           },
           {
             type: 'section',
@@ -487,6 +495,44 @@ slackApp.command('/returnlabel', async ({ ack, body, client, logger }) => {
             type: 'divider'
           },
           {
+            type: 'section',
+            block_id: 'parcel_mode_block',
+            text: {
+              type: 'mrkdwn',
+              text: '*Package info*'
+            },
+            accessory: {
+              type: 'radio_buttons',
+              action_id: 'parcel_mode',
+              initial_option: {
+                text: {
+                  type: 'plain_text',
+                  text: 'Use default package (17" x 17" x 7", 8 lb)',
+                  emoji: true
+                },
+                value: 'default'
+              },
+              options: [
+                {
+                  text: {
+                    type: 'plain_text',
+                    text: 'Use default package (17" x 17" x 7", 8 lb)',
+                    emoji: true
+                  },
+                  value: 'default'
+                },
+                {
+                  text: {
+                    type: 'plain_text',
+                    text: 'Enter custom package info',
+                    emoji: true
+                  },
+                  value: 'custom'
+                }
+              ]
+            }
+          },
+          {
             type: 'input',
             block_id: 'parcel_length_block',
             label: {
@@ -497,8 +543,9 @@ slackApp.command('/returnlabel', async ({ ack, body, client, logger }) => {
             element: {
               type: 'plain_text_input',
               action_id: 'parcel_length',
-              initial_value: '10'
-            }
+              initial_value: DEFAULT_PARCEL.length
+            },
+            optional: true
           },
           {
             type: 'input',
@@ -511,8 +558,9 @@ slackApp.command('/returnlabel', async ({ ack, body, client, logger }) => {
             element: {
               type: 'plain_text_input',
               action_id: 'parcel_width',
-              initial_value: '8'
-            }
+              initial_value: DEFAULT_PARCEL.width
+            },
+            optional: true
           },
           {
             type: 'input',
@@ -525,8 +573,9 @@ slackApp.command('/returnlabel', async ({ ack, body, client, logger }) => {
             element: {
               type: 'plain_text_input',
               action_id: 'parcel_height',
-              initial_value: '4'
-            }
+              initial_value: DEFAULT_PARCEL.height
+            },
+            optional: true
           },
           {
             type: 'input',
@@ -539,8 +588,9 @@ slackApp.command('/returnlabel', async ({ ack, body, client, logger }) => {
             element: {
               type: 'plain_text_input',
               action_id: 'parcel_weight',
-              initial_value: '2'
-            }
+              initial_value: DEFAULT_PARCEL.weight
+            },
+            optional: true
           }
         ]
       }
@@ -554,6 +604,7 @@ slackApp.command('/returnlabel', async ({ ack, body, client, logger }) => {
  * View submission handler for the "Edit Details" modal.
  * Builds a shipment object and updates the modal into a "Review" modal.
  * Uses multi-line addresses, parses them, and shows parsed values in the review.
+ * Also supports default vs custom package info.
  */
 slackApp.view('returnlabel_edit_modal', async ({ ack, body, view, client, logger }) => {
   const log = logger || console;
@@ -593,10 +644,49 @@ slackApp.view('returnlabel_edit_modal', async ({ ack, body, view, client, logger
   const parsedFrom = parseAddressMultiline(fromRawText);
   const parsedTo = parseAddressMultiline(toRawText);
 
-  const parcelLength = getVal('parcel_length_block', 'parcel_length').trim();
-  const parcelWidth = getVal('parcel_width_block', 'parcel_width').trim();
-  const parcelHeight = getVal('parcel_height_block', 'parcel_height').trim();
-  const parcelWeight = getVal('parcel_weight_block', 'parcel_weight').trim();
+  // Package mode: default vs custom
+  const parcelMode =
+    values['parcel_mode_block']?.['parcel_mode']?.selected_option?.value || 'default';
+
+  const parcelLengthRaw = getVal('parcel_length_block', 'parcel_length').trim();
+  const parcelWidthRaw = getVal('parcel_width_block', 'parcel_width').trim();
+  const parcelHeightRaw = getVal('parcel_height_block', 'parcel_height').trim();
+  const parcelWeightRaw = getVal('parcel_weight_block', 'parcel_weight').trim();
+
+  // Validate required fields if using custom package info
+  if (parcelMode === 'custom') {
+    const errors = {};
+
+    if (!parcelLengthRaw) {
+      errors['parcel_length_block'] = 'Required when using custom package info.';
+    }
+    if (!parcelWidthRaw) {
+      errors['parcel_width_block'] = 'Required when using custom package info.';
+    }
+    if (!parcelHeightRaw) {
+      errors['parcel_height_block'] = 'Required when using custom package info.';
+    }
+    if (!parcelWeightRaw) {
+      errors['parcel_weight_block'] = 'Required when using custom package info.';
+    }
+
+    if (Object.keys(errors).length > 0) {
+      await ack({
+        response_action: 'errors',
+        errors
+      });
+      return;
+    }
+  }
+
+  const parcelLength =
+    parcelMode === 'default' ? DEFAULT_PARCEL.length : (parcelLengthRaw || DEFAULT_PARCEL.length);
+  const parcelWidth =
+    parcelMode === 'default' ? DEFAULT_PARCEL.width : (parcelWidthRaw || DEFAULT_PARCEL.width);
+  const parcelHeight =
+    parcelMode === 'default' ? DEFAULT_PARCEL.height : (parcelHeightRaw || DEFAULT_PARCEL.height);
+  const parcelWeight =
+    parcelMode === 'default' ? DEFAULT_PARCEL.weight : (parcelWeightRaw || DEFAULT_PARCEL.weight);
 
   const shipment = {
     address_from: {
@@ -623,11 +713,11 @@ slackApp.view('returnlabel_edit_modal', async ({ ack, body, view, client, logger
     },
     parcels: [
       {
-        length: parcelLength || '10',
-        width: parcelWidth || '8',
-        height: parcelHeight || '4',
+        length: parcelLength,
+        width: parcelWidth,
+        height: parcelHeight,
         distance_unit: 'in',
-        weight: parcelWeight || '2',
+        weight: parcelWeight,
         mass_unit: 'lb'
       }
     ],
@@ -665,7 +755,7 @@ slackApp.view('returnlabel_edit_modal', async ({ ack, body, view, client, logger
     `ZIP: ${parsedTo.zip || 'N/A'}`,
     '',
     '*Parcel:*',
-    `${shipment.parcels[0].length}" x ${shipment.parcels[0].width}" x ${shipment.parcels[0].height}" (${shipment.parcels[0].weight} lb)`
+    `${parcelLength}" x ${parcelWidth}" x ${parcelHeight}" (${parcelWeight} lb)`
   ];
 
   // Use ack with response_action=update to turn this into the review modal
