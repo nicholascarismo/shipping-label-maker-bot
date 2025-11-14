@@ -508,8 +508,8 @@ slackApp.command('/shippinglabel', async ({ ack, body, client, logger }) => {
           text: 'Cancel',
           emoji: true
         },
-        blocks: [
-          /* Ship To section heading */
+                blocks: [
+          /* Ship To section heading + content */
           {
             type: 'section',
             text: {
@@ -517,10 +517,6 @@ slackApp.command('/shippinglabel', async ({ ack, body, client, logger }) => {
               text: '*Ship To Address*'
             }
           },
-          { type: 'divider' },
-          { type: 'divider' },
-
-          /* Ship To (required, multi-line, no default option) */
           {
             type: 'input',
             block_id: 'to_address_multiline_block',
@@ -540,7 +536,7 @@ slackApp.command('/shippinglabel', async ({ ack, body, client, logger }) => {
           { type: 'divider' },
           { type: 'divider' },
 
-          /* Ship From section heading */
+          /* Ship From section heading + content */
           {
             type: 'section',
             text: {
@@ -548,10 +544,6 @@ slackApp.command('/shippinglabel', async ({ ack, body, client, logger }) => {
               text: '*Ship From Address*'
             }
           },
-          { type: 'divider' },
-          { type: 'divider' },
-
-          /* Ship From Mode (Carismo default with optional custom override) */
           {
             type: 'section',
             block_id: 'from_address_mode_block',
@@ -595,7 +587,7 @@ slackApp.command('/shippinglabel', async ({ ack, body, client, logger }) => {
           { type: 'divider' },
           { type: 'divider' },
 
-          /* Package section heading */
+          /* Package section heading + content */
           {
             type: 'section',
             text: {
@@ -603,10 +595,6 @@ slackApp.command('/shippinglabel', async ({ ack, body, client, logger }) => {
               text: '*Package Info*'
             }
           },
-          { type: 'divider' },
-          { type: 'divider' },
-
-          /* Package Mode (same as /returnlabel) */
           {
             type: 'section',
             block_id: 'parcel_mode_block',
@@ -662,7 +650,7 @@ slackApp.command('/shippinglabel', async ({ ack, body, client, logger }) => {
           { type: 'divider' },
           { type: 'divider' },
 
-          /* Shipping Service section heading */
+          /* Shipping Service section heading + content */
           {
             type: 'section',
             text: {
@@ -670,10 +658,6 @@ slackApp.command('/shippinglabel', async ({ ack, body, client, logger }) => {
               text: '*Shipping Service*'
             }
           },
-          { type: 'divider' },
-          { type: 'divider' },
-
-          /* Shipping Service Mode + Signature checkbox (same behavior as /returnlabel) */
           {
             type: 'section',
             block_id: 'service_mode_block',
@@ -786,8 +770,8 @@ slackApp.command('/returnlabel', async ({ ack, body, client, logger }) => {
           text: 'Cancel',
           emoji: true
         },
-        blocks: [
-          /* Ship From section heading */
+                blocks: [
+          /* Ship From section heading + content */
           {
             type: 'section',
             text: {
@@ -795,10 +779,6 @@ slackApp.command('/returnlabel', async ({ ack, body, client, logger }) => {
               text: '*Ship From Address*'
             }
           },
-          { type: 'divider' },
-          { type: 'divider' },
-
-          /* Ship From Mode */
           {
             type: 'section',
             block_id: 'from_address_mode_block',
@@ -844,7 +824,7 @@ slackApp.command('/returnlabel', async ({ ack, body, client, logger }) => {
           { type: 'divider' },
           { type: 'divider' },
 
-          /* Package section heading */
+          /* Package section heading + content */
           {
             type: 'section',
             text: {
@@ -852,10 +832,6 @@ slackApp.command('/returnlabel', async ({ ack, body, client, logger }) => {
               text: '*Package Info*'
             }
           },
-          { type: 'divider' },
-          { type: 'divider' },
-
-          /* Package Mode */
           {
             type: 'section',
             block_id: 'parcel_mode_block',
@@ -911,7 +887,7 @@ slackApp.command('/returnlabel', async ({ ack, body, client, logger }) => {
           { type: 'divider' },
           { type: 'divider' },
 
-          /* Shipping Service section heading */
+          /* Shipping Service section heading + content */
           {
             type: 'section',
             text: {
@@ -919,10 +895,6 @@ slackApp.command('/returnlabel', async ({ ack, body, client, logger }) => {
               text: '*Shipping Service*'
             }
           },
-          { type: 'divider' },
-          { type: 'divider' },
-
-          /* Shipping Service Mode */
           {
             type: 'section',
             block_id: 'service_mode_block',
@@ -1332,32 +1304,33 @@ slackApp.view('shippinglabel_edit_modal', async ({ ack, body, view, client, logg
       title: { type: 'plain_text', text: 'Review Shipping Label Details', emoji: true },
       submit: { type: 'plain_text', text: 'Create Label', emoji: true },
       close:  { type: 'plain_text', text: 'Back', emoji: true },
-      blocks: [
+            blocks: [
         { type: 'section', text: { type: 'mrkdwn', text: 'Please review the details below.' } },
         { type: 'divider' },
 
         /* Ship From section */
         { type: 'section', text: { type: 'mrkdwn', text: '*Ship From Address*' } },
-        { type: 'divider' },
-        { type: 'divider' },
         { type: 'section', text: { type: 'mrkdwn', text: fromLines.join('\n') } },
+
+        { type: 'divider' },
+        { type: 'divider' },
 
         /* Ship To section */
         { type: 'section', text: { type: 'mrkdwn', text: '*Ship To Address*' } },
-        { type: 'divider' },
-        { type: 'divider' },
         { type: 'section', text: { type: 'mrkdwn', text: toLines.join('\n') } },
+
+        { type: 'divider' },
+        { type: 'divider' },
 
         /* Package section */
         { type: 'section', text: { type: 'mrkdwn', text: '*Package Info*' } },
-        { type: 'divider' },
-        { type: 'divider' },
         { type: 'section', text: { type: 'mrkdwn', text: parcelLines.join('\n') } },
+
+        { type: 'divider' },
+        { type: 'divider' },
 
         /* Service section */
         { type: 'section', text: { type: 'mrkdwn', text: '*Shipping Service*' } },
-        { type: 'divider' },
-        { type: 'divider' },
         { type: 'section', text: { type: 'mrkdwn', text: serviceLines.join('\n') } }
       ]
     }
@@ -1707,32 +1680,33 @@ if (serviceMode === 'choose') {
       title: { type: 'plain_text', text: 'Review Return Label Details', emoji: true },
       submit: { type: 'plain_text', text: 'Create Label', emoji: true },
       close:  { type: 'plain_text', text: 'Back', emoji: true },
-      blocks: [
+            blocks: [
         { type: 'section', text: { type: 'mrkdwn', text: 'Please review the details below.' } },
         { type: 'divider' },
 
         /* Ship From section */
         { type: 'section', text: { type: 'mrkdwn', text: '*Ship From Address*' } },
-        { type: 'divider' },
-        { type: 'divider' },
         { type: 'section', text: { type: 'mrkdwn', text: fromLines.join('\n') } },
+
+        { type: 'divider' },
+        { type: 'divider' },
 
         /* Ship To section */
         { type: 'section', text: { type: 'mrkdwn', text: '*Ship To Address*' } },
-        { type: 'divider' },
-        { type: 'divider' },
         { type: 'section', text: { type: 'mrkdwn', text: toLines.join('\n') } },
+
+        { type: 'divider' },
+        { type: 'divider' },
 
         /* Package section */
         { type: 'section', text: { type: 'mrkdwn', text: '*Package Info*' } },
-        { type: 'divider' },
-        { type: 'divider' },
         { type: 'section', text: { type: 'mrkdwn', text: parcelLines.join('\n') } },
+
+        { type: 'divider' },
+        { type: 'divider' },
 
         /* Service section */
         { type: 'section', text: { type: 'mrkdwn', text: '*Shipping Service*' } },
-        { type: 'divider' },
-        { type: 'divider' },
         { type: 'section', text: { type: 'mrkdwn', text: serviceLines.join('\n') } }
       ]
     }
@@ -1824,32 +1798,33 @@ slackApp.action('service_option_select', async ({ ack, body, client, logger }) =
         title: { type: 'plain_text', text: reviewTitleText, emoji: true },
         submit: { type: 'plain_text', text: 'Create Label', emoji: true },
         close:  { type: 'plain_text', text: 'Cancel', emoji: true },
-        blocks: [
+                blocks: [
           { type: 'section', text: { type: 'mrkdwn', text: 'Please review the details below.' } },
           { type: 'divider' },
 
           /* Ship From section */
           { type: 'section', text: { type: 'mrkdwn', text: '*Ship From Address*' } },
-          { type: 'divider' },
-          { type: 'divider' },
           { type: 'section', text: { type: 'mrkdwn', text: fromLines.join('\n') } },
+
+          { type: 'divider' },
+          { type: 'divider' },
 
           /* Ship To section */
           { type: 'section', text: { type: 'mrkdwn', text: '*Ship To Address*' } },
-          { type: 'divider' },
-          { type: 'divider' },
           { type: 'section', text: { type: 'mrkdwn', text: toLines.join('\n') } },
+
+          { type: 'divider' },
+          { type: 'divider' },
 
           /* Package section */
           { type: 'section', text: { type: 'mrkdwn', text: '*Package Info*' } },
-          { type: 'divider' },
-          { type: 'divider' },
           { type: 'section', text: { type: 'mrkdwn', text: parcelLines.join('\n') } },
+
+          { type: 'divider' },
+          { type: 'divider' },
 
           /* Service section */
           { type: 'section', text: { type: 'mrkdwn', text: '*Shipping Service*' } },
-          { type: 'divider' },
-          { type: 'divider' },
           { type: 'section', text: { type: 'mrkdwn', text: serviceLines.join('\n') } }
         ]
       }
