@@ -480,10 +480,23 @@ slackApp.command('/shippinglabel', async ({ ack, body, client, logger }) => {
     logger?.warn?.('Failed to log /shippinglabel command:', e);
   }
 
+  // Post a root message so everything else can live in this thread
+  let threadTs = null;
+  try {
+    const rootMessage = await client.chat.postMessage({
+      channel: targetChannel,
+      text: `📦 Shipping label flow started by <@${body.user_id}>`
+    });
+    threadTs = rootMessage.ts || null;
+  } catch (e) {
+    logger?.error?.('Failed to post root message for /shippinglabel:', e?.stack || e?.message || e);
+  }
+
   const privateMetadata = JSON.stringify({
     channelId: targetChannel,
     userChannelId: body.channel_id,
-    userId: body.user_id
+    userId: body.user_id,
+    threadTs
   });
 
   try {
@@ -508,7 +521,7 @@ slackApp.command('/shippinglabel', async ({ ack, body, client, logger }) => {
           text: 'Cancel',
           emoji: true
         },
-                blocks: [
+        blocks: [
           /* Ship To section heading + content */
           {
             type: 'section',
@@ -742,10 +755,23 @@ slackApp.command('/returnlabel', async ({ ack, body, client, logger }) => {
     logger?.warn?.('Failed to log /returnlabel command:', e);
   }
 
+  // Post a root message so everything else can live in this thread
+  let threadTs = null;
+  try {
+    const rootMessage = await client.chat.postMessage({
+      channel: targetChannel,
+      text: `📦 Return label flow started by <@${body.user_id}>`
+    });
+    threadTs = rootMessage.ts || null;
+  } catch (e) {
+    logger?.error?.('Failed to post root message for /returnlabel:', e?.stack || e?.message || e);
+  }
+
   const privateMetadata = JSON.stringify({
     channelId: targetChannel,
     userChannelId: body.channel_id,
-    userId: body.user_id
+    userId: body.user_id,
+    threadTs
   });
 
   try {
@@ -770,7 +796,7 @@ slackApp.command('/returnlabel', async ({ ack, body, client, logger }) => {
           text: 'Cancel',
           emoji: true
         },
-                blocks: [
+        blocks: [
           /* Ship From section heading + content */
           {
             type: 'section',
@@ -959,20 +985,24 @@ slackApp.command('/returnlabel', async ({ ack, body, client, logger }) => {
 slackApp.view('shippinglabel_edit_modal', async ({ ack, body, view, client, logger }) => {
   const log = logger || console;
 
-  // Recover metadata (channelId, userChannelId, userId)
+  // Recover metadata (channelId, userChannelId, userId, threadTs)
   let channelId = null;
   let userChannelId = null;
   let userIdFromMeta = null;
+  let threadTsFromMeta = null;
   try {
     const meta = view.private_metadata ? JSON.parse(view.private_metadata) : {};
     channelId = meta.channelId || null;
     userChannelId = meta.userChannelId || null;
     userIdFromMeta = meta.userId || null;
+    threadTsFromMeta = meta.threadTs || null;
   } catch (e) {
     log.error?.('Failed to parse private_metadata in shipping edit modal:', e?.stack || e?.message || e);
   }
 
-  const ephemeralChannelId = userChannelId || channelId || body.channel?.id || body.team?.id || undefined;
+  const threadTs = threadTsFromMeta || undefined;
+  // We want ephemerals in the same channel as the root thread, if available
+  const ephemeralChannelId = channelId || userChannelId || body.channel?.id || body.team?.id || undefined;
   const ephemeralUserId = userIdFromMeta || body.user?.id;
 
   const values = view.state.values;
@@ -1043,8 +1073,6 @@ slackApp.view('shippinglabel_edit_modal', async ({ ack, body, view, client, logg
   const parcelWeight = parcelModeResolved === 'default' ? DEFAULT_PARCEL.weight : (parcelWeightRaw || DEFAULT_PARCEL.weight);
 
   // Signature requirement:
-  // - Default: require STANDARD signature
-  // - If checkbox is checked → do NOT require signature (omit signature_confirmation)
   const signatureSelection =
     values['signature_block']?.['signature_toggle']?.selected_options || [];
   const requireSignature = !Array.isArray(signatureSelection) || signatureSelection.length === 0;
@@ -1052,7 +1080,6 @@ slackApp.view('shippinglabel_edit_modal', async ({ ack, body, view, client, logg
   // Build shipment used for rating and (later) purchase
   const shipment = {
     address_from: {
-      // Default name is Carismo Design (not "Returns Department")
       name: parsedFrom.name || 'Carismo Design',
       company: parsedFrom.company || '',
       street1: parsedFrom.street1 || '71 Winant Place (Suite B)',
@@ -1061,8 +1088,8 @@ slackApp.view('shippinglabel_edit_modal', async ({ ack, body, view, client, logg
       state: parsedFrom.state || 'NY',
       zip: parsedFrom.zip || '10309',
       country: 'US',
-      phone: '+1 555 555 5555',
-      email: 'test-sender@example.com'
+      phone: '+1 646 374 8865',
+      email: 'shop@carismodesign.com'
     },
     address_to: {
       name: parsedTo.name || '',
@@ -1089,7 +1116,6 @@ slackApp.view('shippinglabel_edit_modal', async ({ ack, body, view, client, logg
     async: false
   };
 
-  // Attach signature requirement to shipment.extra if needed
   if (requireSignature) {
     shipment.extra = {
       signature_confirmation: 'STANDARD'
@@ -1116,7 +1142,6 @@ slackApp.view('shippinglabel_edit_modal', async ({ ack, body, view, client, logg
 
     const actionBlocks = [];
 
-    // ONE button per actions block to avoid duplicate action_id errors
     for (const r of ratesArr) {
       const provider = r.provider || r.carrier || (r.carrier_account && r.carrier_account.carrier) || 'Unknown';
       const service  = (r.servicelevel && r.servicelevel.name) || r.servicelevel_name || r.service || 'Unknown';
@@ -1131,7 +1156,8 @@ slackApp.view('shippinglabel_edit_modal', async ({ ack, body, view, client, logg
           amount: r.amount || null,
           currency: r.currency || 'USD',
           etaDays: typeof r.estimated_days === 'number' ? r.estimated_days : null
-        }
+        },
+        threadTs: threadTsFromMeta || null
       };
 
       actionBlocks.push({
@@ -1171,7 +1197,8 @@ slackApp.view('shippinglabel_edit_modal', async ({ ack, body, view, client, logg
       await client.chat.postEphemeral({
         channel: ephemeralChannelId,
         user: ephemeralUserId,
-        text: `❌ Failed to fetch shipping services from Shippo: \`${e?.message || e}\``
+        text: `❌ Failed to fetch shipping services from Shippo: \`${e?.message || e}\``,
+        thread_ts: threadTs
       });
     } catch {}
     return;
@@ -1183,7 +1210,8 @@ slackApp.view('shippinglabel_edit_modal', async ({ ack, body, view, client, logg
       await client.chat.postEphemeral({
         channel: ephemeralChannelId,
         user: ephemeralUserId,
-        text: `❌ No shipping services returned for this shipment. Please verify addresses and package dimensions.`
+        text: `❌ No shipping services returned for this shipment. Please verify addresses and package dimensions.`,
+        thread_ts: threadTs
       });
     } catch {}
     return;
@@ -1197,14 +1225,16 @@ slackApp.view('shippinglabel_edit_modal', async ({ ack, body, view, client, logg
         channel: ephemeralChannelId,
         user: ephemeralUserId,
         blocks: buildRateBlocks(rates),
-        text: 'Select a shipping service' // fallback
+        text: 'Select a shipping service',
+        thread_ts: threadTs
       });
     } catch (e) {
       try {
         await client.chat.postEphemeral({
           channel: ephemeralChannelId,
           user: ephemeralUserId,
-          text: `❌ Failed to post shipping options: \`${e?.message || e}\``
+          text: `❌ Failed to post shipping options: \`${e?.message || e}\``,
+          thread_ts: threadTs
         });
       } catch {}
     }
@@ -1216,7 +1246,6 @@ slackApp.view('shippinglabel_edit_modal', async ({ ack, body, view, client, logg
     const provider = (r.provider || r.carrier || (r.carrier_account && r.carrier_account.carrier) || '').toLowerCase();
     const service  = ((r.servicelevel && r.servicelevel.name) || r.servicelevel_name || r.service || '').toLowerCase();
 
-    // Require UPS + "ground" in the service name, but explicitly exclude any "saver" variants.
     return provider === 'ups' && service.includes('ground') && !service.includes('saver');
   });
 
@@ -1227,14 +1256,16 @@ slackApp.view('shippinglabel_edit_modal', async ({ ack, body, view, client, logg
         channel: ephemeralChannelId,
         user: ephemeralUserId,
         text: 'UPS Ground not available for this shipment. Please choose a service from the options below.',
-        blocks: buildRateBlocks(rates)
+        blocks: buildRateBlocks(rates),
+        thread_ts: threadTs
       });
     } catch (e) {
       try {
         await client.chat.postEphemeral({
           channel: ephemeralChannelId,
           user: ephemeralUserId,
-          text: `❌ Failed to post shipping options: \`${e?.message || e}\``
+          text: `❌ Failed to post shipping options: \`${e?.message || e}\``,
+          thread_ts: threadTs
         });
       } catch {}
     }
@@ -1242,7 +1273,7 @@ slackApp.view('shippinglabel_edit_modal', async ({ ack, body, view, client, logg
   }
 
   // Build review with the preselected UPS Ground
-    const selectedRate = {
+  const selectedRate = {
     id: upsGround.object_id,
     provider: upsGround.provider || upsGround.carrier || (upsGround.carrier_account && upsGround.carrier_account.carrier) || 'UPS',
     service: (upsGround.servicelevel && upsGround.servicelevel.name) || upsGround.servicelevel_name || upsGround.service || 'Ground',
@@ -1264,7 +1295,8 @@ slackApp.view('shippinglabel_edit_modal', async ({ ack, body, view, client, logg
   const reviewMetadata = JSON.stringify({
     channelId,
     shipment,
-    selectedRate
+    selectedRate,
+    threadTs: threadTsFromMeta || null
   });
 
   const fromLines = [
@@ -1304,7 +1336,7 @@ slackApp.view('shippinglabel_edit_modal', async ({ ack, body, view, client, logg
       title: { type: 'plain_text', text: 'Review Shipping Label', emoji: true },
       submit: { type: 'plain_text', text: 'Create Label', emoji: true },
       close:  { type: 'plain_text', text: 'Back', emoji: true },
-            blocks: [
+      blocks: [
         { type: 'section', text: { type: 'mrkdwn', text: 'Please review the details below.' } },
         { type: 'divider' },
 
@@ -1354,21 +1386,24 @@ slackApp.view('returnlabel_edit_modal', async ({ ack, body, view, client, logger
   // 1) ACK IMMEDIATELY so Slack doesn't time out this view submission.
   await ack();
 
-  // 2) Recover metadata (channelId, userChannelId, userId)
+  // 2) Recover metadata (channelId, userChannelId, userId, threadTs)
   let channelId = null;
   let userChannelId = null;
   let userIdFromMeta = null;
+  let threadTsFromMeta = null;
   try {
     const meta = view.private_metadata ? JSON.parse(view.private_metadata) : {};
     channelId = meta.channelId || null;
     userChannelId = meta.userChannelId || null;
     userIdFromMeta = meta.userId || null;
+    threadTsFromMeta = meta.threadTs || null;
   } catch (e) {
     log.error?.('Failed to parse private_metadata in return edit modal:', e?.stack || e?.message || e);
   }
 
+  const threadTs = threadTsFromMeta || undefined;
   const ephemeralChannelId =
-    userChannelId || channelId || body.channel?.id || body.team?.id || undefined;
+    channelId || userChannelId || body.channel?.id || body.team?.id || undefined;
   const ephemeralUserId = userIdFromMeta || body.user?.id;
 
   const values = view.state.values;
@@ -1381,10 +1416,8 @@ slackApp.view('returnlabel_edit_modal', async ({ ack, body, view, client, logger
     getVal('from_address_multiline_block', 'from_address_multiline') || '';
   const fromAddressTrimmed = fromAddressInputRaw.trim();
 
-  // If user typed anything, treat it as "custom" regardless of radio selection
   const fromModeResolved = fromAddressTrimmed.length > 0 ? 'custom' : fromMode;
 
-  // Backend default is still Carismo unless they typed something
   const fromRawText =
     fromModeResolved === 'default'
       ? DEFAULT_FROM_ADDRESS_TEXT
@@ -1405,7 +1438,6 @@ slackApp.view('returnlabel_edit_modal', async ({ ack, body, view, client, logger
   const parcelHeightRaw = getVal('parcel_height_block', 'parcel_height').trim();
   const parcelWeightRaw = getVal('parcel_weight_block', 'parcel_weight').trim();
 
-  // If any custom fields have content, treat as "custom" regardless of radio selection
   const hasAnyParcelInput =
     parcelLengthRaw.length > 0 ||
     parcelWidthRaw.length > 0 ||
@@ -1414,9 +1446,6 @@ slackApp.view('returnlabel_edit_modal', async ({ ack, body, view, client, logger
 
   const parcelModeResolved = hasAnyParcelInput ? 'custom' : parcelMode;
 
-  // Instead of rejecting with Slack "errors", we:
-  //  - If user chose custom (or typed anything), use their numbers when present
-  //    and silently fall back to defaults for any missing fields.
   const parcelLength =
     parcelModeResolved === 'default'
       ? DEFAULT_PARCEL.length
@@ -1435,8 +1464,6 @@ slackApp.view('returnlabel_edit_modal', async ({ ack, body, view, client, logger
       : (parcelWeightRaw || DEFAULT_PARCEL.weight);
 
   // 6) Signature requirement:
-  // - Default: require STANDARD signature
-  // - If checkbox is checked → do NOT require signature (omit signature_confirmation)
   const signatureSelection =
     values['signature_block']?.['signature_toggle']?.selected_options || [];
   const requireSignature =
@@ -1453,8 +1480,8 @@ slackApp.view('returnlabel_edit_modal', async ({ ack, body, view, client, logger
       state: parsedFrom.state || 'NY',
       zip: parsedFrom.zip || '10309',
       country: 'US',
-      phone: '+1 555 555 5555',
-      email: 'test-sender@example.com'
+      phone: '+1 646 374 8865',
+      email: 'shop@carismodesign.com'
     },
     address_to: {
       name: parsedTo.name || 'Returns Department',
@@ -1465,8 +1492,8 @@ slackApp.view('returnlabel_edit_modal', async ({ ack, body, view, client, logger
       state: parsedTo.state || 'NY',
       zip: parsedTo.zip || '10309',
       country: 'US',
-      phone: '+1 555 111 2222',
-      email: 'test-recipient@example.com'
+      phone: '+1 646 374 8865',
+      email: 'shop@carismodesign.com'
     },
     parcels: [
       {
@@ -1481,7 +1508,6 @@ slackApp.view('returnlabel_edit_modal', async ({ ack, body, view, client, logger
     async: false
   };
 
-  // Attach signature requirement to shipment.extra if needed
   if (requireSignature) {
     shipment.extra = {
       signature_confirmation: 'STANDARD'
@@ -1520,7 +1546,6 @@ slackApp.view('returnlabel_edit_modal', async ({ ack, body, view, client, logger
 
     const actionBlocks = [];
 
-    // ONE button per actions block to avoid duplicate action_id errors
     for (const r of ratesArr) {
       const provider =
         r.provider || r.carrier || (r.carrier_account && r.carrier_account.carrier) || 'Unknown';
@@ -1540,7 +1565,8 @@ slackApp.view('returnlabel_edit_modal', async ({ ack, body, view, client, logger
           amount: r.amount || null,
           currency: r.currency || 'USD',
           etaDays: typeof r.estimated_days === 'number' ? r.estimated_days : null
-        }
+        },
+        threadTs: threadTsFromMeta || null
       };
 
       actionBlocks.push({
@@ -1583,7 +1609,8 @@ slackApp.view('returnlabel_edit_modal', async ({ ack, body, view, client, logger
         await client.chat.postEphemeral({
           channel: ephemeralChannelId,
           user: ephemeralUserId,
-          text: `❌ Failed to fetch shipping services from Shippo: \`${e?.message || e}\``
+          text: `❌ Failed to fetch shipping services from Shippo: \`${e?.message || e}\``,
+          thread_ts: threadTs
         });
       } catch (e2) {
         log.error?.('Failed to post Shippo error to Slack (choose mode):', e2?.stack || e2?.message || e2);
@@ -1597,7 +1624,8 @@ slackApp.view('returnlabel_edit_modal', async ({ ack, body, view, client, logger
           channel: ephemeralChannelId,
           user: ephemeralUserId,
           text:
-            '❌ No shipping services returned for this shipment. Please verify addresses and package dimensions.'
+            '❌ No shipping services returned for this shipment. Please verify addresses and package dimensions.',
+          thread_ts: threadTs
         });
       } catch (e2) {
         log.error?.('Failed to post "no services" message (choose mode):', e2?.stack || e2?.message || e2);
@@ -1610,7 +1638,8 @@ slackApp.view('returnlabel_edit_modal', async ({ ack, body, view, client, logger
         channel: ephemeralChannelId,
         user: ephemeralUserId,
         blocks: buildRateBlocks(rates),
-        text: 'Select a shipping service' // fallback
+        text: 'Select a shipping service',
+        thread_ts: threadTs
       });
     } catch (e2) {
       log.error?.('Failed to post shipping options (choose mode):', e2?.stack || e2?.message || e2);
@@ -1618,7 +1647,8 @@ slackApp.view('returnlabel_edit_modal', async ({ ack, body, view, client, logger
         await client.chat.postEphemeral({
           channel: ephemeralChannelId,
           user: ephemeralUserId,
-          text: `❌ Failed to post shipping options: \`${e2?.message || e2}\``
+          text: `❌ Failed to post shipping options: \`${e2?.message || e2}\``,
+          thread_ts: threadTs
         });
       } catch {}
     }
@@ -1635,7 +1665,8 @@ slackApp.view('returnlabel_edit_modal', async ({ ack, body, view, client, logger
       await client.chat.postEphemeral({
         channel: ephemeralChannelId,
         user: ephemeralUserId,
-        text: `❌ Failed to fetch shipping services from Shippo: \`${e?.message || e}\``
+        text: `❌ Failed to fetch shipping services from Shippo: \`${e?.message || e}\``,
+        thread_ts: threadTs
       });
     } catch (e2) {
       log.error?.('Failed to post Shippo error to Slack (default mode):', e2?.stack || e2?.message || e2);
@@ -1649,7 +1680,8 @@ slackApp.view('returnlabel_edit_modal', async ({ ack, body, view, client, logger
         channel: ephemeralChannelId,
         user: ephemeralUserId,
         text:
-          '❌ No shipping services returned for this shipment. Please verify addresses and package dimensions.'
+          '❌ No shipping services returned for this shipment. Please verify addresses and package dimensions.',
+        thread_ts: threadTs
       });
     } catch (e2) {
       log.error?.('Failed to post "no services" message (default mode):', e2?.stack || e2?.message || e2);
@@ -1666,11 +1698,9 @@ slackApp.view('returnlabel_edit_modal', async ({ ack, body, view, client, logger
         r.service ||
         '').toLowerCase();
 
-    // Require UPS + "ground" in the service name, but explicitly exclude any "saver" variants.
     return provider === 'ups' && service.includes('ground') && !service.includes('saver');
   });
 
-  // If UPS Ground not available, fall back to the chooser flow using the same helper.
   if (!upsGround) {
     try {
       await client.chat.postEphemeral({
@@ -1678,7 +1708,8 @@ slackApp.view('returnlabel_edit_modal', async ({ ack, body, view, client, logger
         user: ephemeralUserId,
         text:
           'UPS Ground not available for this shipment. Please choose a service from the options below.',
-        blocks: buildRateBlocks(rates)
+        blocks: buildRateBlocks(rates),
+        thread_ts: threadTs
       });
     } catch (e2) {
       log.error?.('Failed to post shipping options fallback (no UPS Ground):', e2?.stack || e2?.message || e2);
@@ -1686,7 +1717,8 @@ slackApp.view('returnlabel_edit_modal', async ({ ack, body, view, client, logger
         await client.chat.postEphemeral({
           channel: ephemeralChannelId,
           user: ephemeralUserId,
-          text: `❌ Failed to post shipping options: \`${e2?.message || e2}\``
+          text: `❌ Failed to post shipping options: \`${e2?.message || e2}\``,
+          thread_ts: threadTs
         });
       } catch {}
     }
@@ -1727,7 +1759,8 @@ slackApp.view('returnlabel_edit_modal', async ({ ack, body, view, client, logger
     try {
       await client.chat.postMessage({
         channel: channelId,
-        text: `❌ Failed to create Shippo return label: \`${msg}\``
+        text: `❌ Failed to create Shippo return label: \`${msg}\``,
+        thread_ts: threadTs
       });
     } catch {}
     return;
@@ -1761,7 +1794,8 @@ slackApp.view('returnlabel_edit_modal', async ({ ack, body, view, client, logger
           `*Service:* ${serviceOut || 'N/A'}\n` +
           `*ETA:* ${etaDescription}\n` +
           `Tracking URL: ${trackingUrl || 'N/A'}\n` +
-          `Error downloading PDF: \`${msg}\``
+          `Error downloading PDF: \`${msg}\``,
+        thread_ts: threadTs
       });
     } catch {}
     return;
@@ -1778,7 +1812,8 @@ slackApp.view('returnlabel_edit_modal', async ({ ack, body, view, client, logger
         `• *Tracking number:* ${trackingNumber || 'N/A'}\n` +
         `• *Carrier:* ${carrierOut || 'N/A'}\n` +
         `• *Service:* ${serviceOut || 'N/A'}\n` +
-        `• *ETA:* ${etaDescription}`
+        `• *ETA:* ${etaDescription}`,
+      thread_ts: threadTs
     });
   } catch (e) {
     const msg = e?.message || String(e);
@@ -1793,7 +1828,8 @@ slackApp.view('returnlabel_edit_modal', async ({ ack, body, view, client, logger
           `*Service:* ${serviceOut || 'N/A'}\n` +
           `*ETA:* ${etaDescription}\n` +
           `Tracking URL: ${trackingUrl || 'N/A'}\n` +
-          `Upload error: \`${msg}\``
+          `Upload error: \`${msg}\``,
+        thread_ts: threadTs
       });
     } catch {}
   }
@@ -1822,6 +1858,7 @@ slackApp.action('service_option_select', async ({ ack, body, client, logger }) =
 
   const flow = payload.flow || 'returnlabel';
   const { channelId, shipment, selectedRate } = payload;
+  const threadTs = payload.threadTs || null;
 
   const priceStr = selectedRate.amount
     ? (selectedRate.currency === 'USD'
@@ -1836,7 +1873,8 @@ slackApp.action('service_option_select', async ({ ack, body, client, logger }) =
   const reviewMetadata = JSON.stringify({
     channelId,
     shipment,
-    selectedRate
+    selectedRate,
+    threadTs
   });
 
   const fromLines = [
@@ -1881,10 +1919,10 @@ slackApp.action('service_option_select', async ({ ack, body, client, logger }) =
         type: 'modal',
         callback_id: reviewCallbackId,
         private_metadata: reviewMetadata,
-        title: { type: 'plain_text', text: 'Review Return Label', emoji: true },
+        title: { type: 'plain_text', text: reviewTitleText, emoji: true },
         submit: { type: 'plain_text', text: 'Create Label', emoji: true },
         close:  { type: 'plain_text', text: 'Cancel', emoji: true },
-                blocks: [
+        blocks: [
           { type: 'section', text: { type: 'mrkdwn', text: 'Please review the details below.' } },
           { type: 'divider' },
 
@@ -1920,7 +1958,8 @@ slackApp.action('service_option_select', async ({ ack, body, client, logger }) =
     try {
       await client.chat.postMessage({
         channel: channelId,
-        text: `❌ Failed to open Review modal: \`${e?.message || e}\``
+        text: `❌ Failed to open Review modal: \`${e?.message || e}\``,
+        thread_ts: threadTs || undefined
       });
     } catch {}
   }
@@ -1932,7 +1971,6 @@ slackApp.action('service_option_select', async ({ ack, body, client, logger }) =
  * Then downloads the PDF and uploads it to Slack with carrier/service/ETA.
  */
 slackApp.view('shippinglabel_review_modal', async ({ ack, body, view, client, logger }) => {
-  // Close/submit the modal
   await ack();
 
   const log = logger || console;
@@ -1940,12 +1978,14 @@ slackApp.view('shippinglabel_review_modal', async ({ ack, body, view, client, lo
   let channelId = null;
   let shipment = null;
   let selectedRate = null;
+  let threadTs = null;
 
   try {
     const meta = view.private_metadata ? JSON.parse(view.private_metadata) : {};
     channelId = meta.channelId || null;
     shipment = meta.shipment || null;
     selectedRate = meta.selectedRate || null;
+    threadTs = meta.threadTs || null;
   } catch (e) {
     log.error?.('Failed to parse private_metadata in shipping review modal:', e?.stack || e?.message || e);
   }
@@ -1955,7 +1995,6 @@ slackApp.view('shippinglabel_review_modal', async ({ ack, body, view, client, lo
     return;
   }
 
-  // 1) Buy label (selected rate if provided; else default flow)
   let trackingNumber, labelUrl, trackingUrl;
   let carrierOut = null, serviceOut = null, etaDaysOut = null;
 
@@ -1969,7 +2008,6 @@ slackApp.view('shippinglabel_review_modal', async ({ ack, body, view, client, lo
       serviceOut = selectedRate.service || null;
       etaDaysOut = typeof selectedRate.etaDays === 'number' ? selectedRate.etaDays : null;
     } else {
-      // Reuse the same generic helper; despite the name it creates a shipment + label
       const label = await createReturnLabelWithShippo(shipment, logger);
       trackingNumber = label.trackingNumber;
       labelUrl = label.labelUrl;
@@ -1984,7 +2022,8 @@ slackApp.view('shippinglabel_review_modal', async ({ ack, body, view, client, lo
     try {
       await client.chat.postMessage({
         channel: channelId,
-        text: `❌ Failed to create Shippo shipping label: \`${msg}\``
+        text: `❌ Failed to create Shippo shipping label: \`${msg}\``,
+        thread_ts: threadTs || undefined
       });
     } catch {}
     return;
@@ -1995,7 +2034,6 @@ slackApp.view('shippinglabel_review_modal', async ({ ack, body, view, client, lo
       ? `${etaDaysOut} business day${etaDaysOut === 1 ? '' : 's'} (estimated)`
       : 'N/A';
 
-  // 2) Download the PDF from Shippo
   let pdfBuffer;
   try {
     const pdfRes = await fetch(labelUrl);
@@ -2018,13 +2056,13 @@ slackApp.view('shippinglabel_review_modal', async ({ ack, body, view, client, lo
           `*Service:* ${serviceOut || 'N/A'}\n` +
           `*ETA:* ${etaDescription}\n` +
           `Tracking URL: ${trackingUrl || 'N/A'}\n` +
-          `Error downloading PDF: \`${msg}\``
+          `Error downloading PDF: \`${msg}\``,
+        thread_ts: threadTs || undefined
       });
     } catch {}
     return;
   }
 
-  // 3) Upload the PDF into Slack
   try {
     await client.files.uploadV2({
       channel_id: channelId,
@@ -2035,7 +2073,8 @@ slackApp.view('shippinglabel_review_modal', async ({ ack, body, view, client, lo
         `• *Tracking number:* ${trackingNumber || 'N/A'}\n` +
         `• *Carrier:* ${carrierOut || 'N/A'}\n` +
         `• *Service:* ${serviceOut || 'N/A'}\n` +
-        `• *ETA:* ${etaDescription}`
+        `• *ETA:* ${etaDescription}`,
+      thread_ts: threadTs || undefined
     });
   } catch (e) {
     const msg = e?.message || String(e);
@@ -2050,7 +2089,8 @@ slackApp.view('shippinglabel_review_modal', async ({ ack, body, view, client, lo
           `*Service:* ${serviceOut || 'N/A'}\n` +
           `*ETA:* ${etaDescription}\n` +
           `Tracking URL: ${trackingUrl || 'N/A'}\n` +
-          `Upload error: \`${msg}\``
+          `Upload error: \`${msg}\``,
+        thread_ts: threadTs || undefined
       });
     } catch {}
   }
@@ -2062,7 +2102,6 @@ slackApp.view('shippinglabel_review_modal', async ({ ack, body, view, client, lo
  * Then downloads the PDF and uploads it to Slack with carrier/service/ETA.
  */
 slackApp.view('returnlabel_review_modal', async ({ ack, body, view, client, logger }) => {
-  // Close/submit the modal
   await ack();
 
   const log = logger || console;
@@ -2070,12 +2109,14 @@ slackApp.view('returnlabel_review_modal', async ({ ack, body, view, client, logg
   let channelId = null;
   let shipment = null;
   let selectedRate = null;
+  let threadTs = null;
 
   try {
     const meta = view.private_metadata ? JSON.parse(view.private_metadata) : {};
     channelId = meta.channelId || null;
     shipment = meta.shipment || null;
     selectedRate = meta.selectedRate || null;
+    threadTs = meta.threadTs || null;
   } catch (e) {
     log.error?.('Failed to parse private_metadata in review modal:', e?.stack || e?.message || e);
   }
@@ -2085,7 +2126,6 @@ slackApp.view('returnlabel_review_modal', async ({ ack, body, view, client, logg
     return;
   }
 
-  // 1) Buy label (selected rate if provided; else default flow)
   let trackingNumber, labelUrl, trackingUrl;
   let carrierOut = null, serviceOut = null, etaDaysOut = null;
 
@@ -2113,7 +2153,8 @@ slackApp.view('returnlabel_review_modal', async ({ ack, body, view, client, logg
     try {
       await client.chat.postMessage({
         channel: channelId,
-        text: `❌ Failed to create Shippo return label: \`${msg}\``
+        text: `❌ Failed to create Shippo return label: \`${msg}\``,
+        thread_ts: threadTs || undefined
       });
     } catch {}
     return;
@@ -2124,7 +2165,6 @@ slackApp.view('returnlabel_review_modal', async ({ ack, body, view, client, logg
       ? `${etaDaysOut} business day${etaDaysOut === 1 ? '' : 's'} (estimated)`
       : 'N/A';
 
-  // 2) Download the PDF from Shippo
   let pdfBuffer;
   try {
     const pdfRes = await fetch(labelUrl);
@@ -2147,13 +2187,13 @@ slackApp.view('returnlabel_review_modal', async ({ ack, body, view, client, logg
           `*Service:* ${serviceOut || 'N/A'}\n` +
           `*ETA:* ${etaDescription}\n` +
           `Tracking URL: ${trackingUrl || 'N/A'}\n` +
-          `Error downloading PDF: \`${msg}\``
+          `Error downloading PDF: \`${msg}\``,
+        thread_ts: threadTs || undefined
       });
     } catch {}
     return;
   }
 
-  // 3) Upload the PDF into Slack
   try {
     await client.files.uploadV2({
       channel_id: channelId,
@@ -2164,7 +2204,8 @@ slackApp.view('returnlabel_review_modal', async ({ ack, body, view, client, logg
         `• *Tracking number:* ${trackingNumber || 'N/A'}\n` +
         `• *Carrier:* ${carrierOut || 'N/A'}\n` +
         `• *Service:* ${serviceOut || 'N/A'}\n` +
-        `• *ETA:* ${etaDescription}`
+        `• *ETA:* ${etaDescription}`,
+      thread_ts: threadTs || undefined
     });
   } catch (e) {
     const msg = e?.message || String(e);
@@ -2179,7 +2220,8 @@ slackApp.view('returnlabel_review_modal', async ({ ack, body, view, client, logg
           `*Service:* ${serviceOut || 'N/A'}\n` +
           `*ETA:* ${etaDescription}\n` +
           `Tracking URL: ${trackingUrl || 'N/A'}\n` +
-          `Upload error: \`${msg}\``
+          `Upload error: \`${msg}\``,
+        thread_ts: threadTs || undefined
       });
     } catch {}
   }
