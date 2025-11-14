@@ -519,9 +519,11 @@ slackApp.command('/returnlabel', async ({ ack, body, client, logger }) => {
     logger?.warn?.('Failed to log /returnlabel command:', e);
   }
 
-  const privateMetadata = JSON.stringify({
-    channelId: targetChannel
-  });
+const privateMetadata = JSON.stringify({
+  channelId: targetChannel,
+  userChannelId: body.channel_id,
+  userId: body.user_id
+});
 
   try {
     await client.views.open({
@@ -580,18 +582,18 @@ slackApp.command('/returnlabel', async ({ ack, body, client, logger }) => {
             }
           },
           {
-            type: 'input',
-            block_id: 'from_address_multiline_block',
-            label: { type: 'plain_text', text: 'Ship From (multi-line address)', emoji: true },
-            element: {
-              type: 'plain_text_input',
-              action_id: 'from_address_multiline',
-              multiline: true,
-              initial_value: DEFAULT_FROM_ADDRESS_TEXT
-            },
-            hint: { type: 'plain_text', text: 'Lines: Name, Company (optional), Street, City, ST ZIP' },
-            optional: true
-          },
+  type: 'input',
+  block_id: 'from_address_multiline_block',
+  label: { type: 'plain_text', text: 'Ship From (multi-line address)', emoji: true },
+  element: {
+    type: 'plain_text_input',
+    action_id: 'from_address_multiline',
+    multiline: true,
+    initial_value: ''
+  },
+  hint: { type: 'plain_text', text: 'Lines: Name, Company (optional), Street, City, ST ZIP' },
+  optional: true
+},
 
           /* Ship To (fixed) */
           {
@@ -628,33 +630,33 @@ slackApp.command('/returnlabel', async ({ ack, body, client, logger }) => {
             }
           },
           {
-            type: 'input',
-            block_id: 'parcel_length_block',
-            label: { type: 'plain_text', text: 'Parcel Length (in)', emoji: true },
-            element: { type: 'plain_text_input', action_id: 'parcel_length', initial_value: DEFAULT_PARCEL.length },
-            optional: true
-          },
-          {
-            type: 'input',
-            block_id: 'parcel_width_block',
-            label: { type: 'plain_text', text: 'Parcel Width (in)', emoji: true },
-            element: { type: 'plain_text_input', action_id: 'parcel_width', initial_value: DEFAULT_PARCEL.width },
-            optional: true
-          },
-          {
-            type: 'input',
-            block_id: 'parcel_height_block',
-            label: { type: 'plain_text', text: 'Parcel Height (in)', emoji: true },
-            element: { type: 'plain_text_input', action_id: 'parcel_height', initial_value: DEFAULT_PARCEL.height },
-            optional: true
-          },
-          {
-            type: 'input',
-            block_id: 'parcel_weight_block',
-            label: { type: 'plain_text', text: 'Parcel Weight (lb)', emoji: true },
-            element: { type: 'plain_text_input', action_id: 'parcel_weight', initial_value: DEFAULT_PARCEL.weight },
-            optional: true
-          },
+  type: 'input',
+  block_id: 'parcel_length_block',
+  label: { type: 'plain_text', text: 'Parcel Length (in)', emoji: true },
+  element: { type: 'plain_text_input', action_id: 'parcel_length', initial_value: '' },
+  optional: true
+},
+{
+  type: 'input',
+  block_id: 'parcel_width_block',
+  label: { type: 'plain_text', text: 'Parcel Width (in)', emoji: true },
+  element: { type: 'plain_text_input', action_id: 'parcel_width', initial_value: '' },
+  optional: true
+},
+{
+  type: 'input',
+  block_id: 'parcel_height_block',
+  label: { type: 'plain_text', text: 'Parcel Height (in)', emoji: true },
+  element: { type: 'plain_text_input', action_id: 'parcel_height', initial_value: '' },
+  optional: true
+},
+{
+  type: 'input',
+  block_id: 'parcel_weight_block',
+  label: { type: 'plain_text', text: 'Parcel Weight (lb)', emoji: true },
+  element: { type: 'plain_text_input', action_id: 'parcel_weight', initial_value: '' },
+  optional: true
+},
 
           { type: 'divider' },
 
@@ -699,22 +701,38 @@ slackApp.command('/returnlabel', async ({ ack, body, client, logger }) => {
 slackApp.view('returnlabel_edit_modal', async ({ ack, body, view, client, logger }) => {
   const log = logger || console;
 
-  // Recover metadata (channelId)
+  // Recover metadata (channelId, userChannelId, userId)
   let channelId = null;
+  let userChannelId = null;
+  let userIdFromMeta = null;
   try {
     const meta = view.private_metadata ? JSON.parse(view.private_metadata) : {};
     channelId = meta.channelId || null;
+    userChannelId = meta.userChannelId || null;
+    userIdFromMeta = meta.userId || null;
   } catch (e) {
     log.error?.('Failed to parse private_metadata in edit modal:', e?.stack || e?.message || e);
   }
 
+  const ephemeralChannelId = userChannelId || channelId || body.channel?.id || body.team?.id || undefined;
+  const ephemeralUserId = userIdFromMeta || body.user?.id;
+
   const values = view.state.values;
   const getVal = (b, a) => values[b]?.[a]?.value || '';
 
-  // Ship From mode and raw input
-  const fromMode = values['from_address_mode_block']?.['from_address_mode']?.selected_option?.value || 'default';
-  const fromAddressInputRaw = getVal('from_address_multiline_block', 'from_address_multiline') || '';
-  const fromRawText = fromMode === 'default' ? DEFAULT_FROM_ADDRESS_TEXT : (fromAddressInputRaw.trim() || DEFAULT_FROM_ADDRESS_TEXT);
+// Ship From mode and raw input
+const fromMode = values['from_address_mode_block']?.['from_address_mode']?.selected_option?.value || 'default';
+const fromAddressInputRaw = getVal('from_address_multiline_block', 'from_address_multiline') || '';
+const fromAddressTrimmed = fromAddressInputRaw.trim();
+
+// If user typed anything, treat it as "custom" regardless of radio selection
+const fromModeResolved = fromAddressTrimmed.length > 0 ? 'custom' : fromMode;
+
+// Backend default is still Carismo unless they typed something
+const fromRawText =
+  fromModeResolved === 'default'
+    ? DEFAULT_FROM_ADDRESS_TEXT
+    : (fromAddressTrimmed || DEFAULT_FROM_ADDRESS_TEXT);
 
   // Ship To fixed
   const toRawText = DEFAULT_TO_ADDRESS_TEXT;
@@ -723,29 +741,38 @@ slackApp.view('returnlabel_edit_modal', async ({ ack, body, view, client, logger
   const parsedFrom = parseAddressMultiline(fromRawText);
   const parsedTo = parseAddressMultiline(toRawText);
 
-  // Package mode & values
-  const parcelMode = values['parcel_mode_block']?.['parcel_mode']?.selected_option?.value || 'default';
-  const parcelLengthRaw = getVal('parcel_length_block', 'parcel_length').trim();
-  const parcelWidthRaw  = getVal('parcel_width_block',  'parcel_width').trim();
-  const parcelHeightRaw = getVal('parcel_height_block', 'parcel_height').trim();
-  const parcelWeightRaw = getVal('parcel_weight_block', 'parcel_weight').trim();
+ // Package mode & values
+const parcelMode = values['parcel_mode_block']?.['parcel_mode']?.selected_option?.value || 'default';
+const parcelLengthRaw = getVal('parcel_length_block', 'parcel_length').trim();
+const parcelWidthRaw  = getVal('parcel_width_block',  'parcel_width').trim();
+const parcelHeightRaw = getVal('parcel_height_block', 'parcel_height').trim();
+const parcelWeightRaw = getVal('parcel_weight_block', 'parcel_weight').trim();
 
-  if (parcelMode === 'custom') {
-    const errors = {};
-    if (!parcelLengthRaw) errors['parcel_length_block'] = 'Required when using custom package info.';
-    if (!parcelWidthRaw)  errors['parcel_width_block']  = 'Required when using custom package info.';
-    if (!parcelHeightRaw) errors['parcel_height_block'] = 'Required when using custom package info.';
-    if (!parcelWeightRaw) errors['parcel_weight_block'] = 'Required when using custom package info.';
-    if (Object.keys(errors).length > 0) {
-      await ack({ response_action: 'errors', errors });
-      return;
-    }
+// If any custom fields have content, treat as "custom" regardless of radio selection
+const hasAnyParcelInput =
+  parcelLengthRaw.length > 0 ||
+  parcelWidthRaw.length > 0 ||
+  parcelHeightRaw.length > 0 ||
+  parcelWeightRaw.length > 0;
+
+const parcelModeResolved = hasAnyParcelInput ? 'custom' : parcelMode;
+
+if (parcelModeResolved === 'custom') {
+  const errors = {};
+  if (!parcelLengthRaw) errors['parcel_length_block'] = 'Required when using custom package info.';
+  if (!parcelWidthRaw)  errors['parcel_width_block']  = 'Required when using custom package info.';
+  if (!parcelHeightRaw) errors['parcel_height_block'] = 'Required when using custom package info.';
+  if (!parcelWeightRaw) errors['parcel_weight_block'] = 'Required when using custom package info.';
+  if (Object.keys(errors).length > 0) {
+    await ack({ response_action: 'errors', errors });
+    return;
   }
+}
 
-  const parcelLength = parcelMode === 'default' ? DEFAULT_PARCEL.length : (parcelLengthRaw || DEFAULT_PARCEL.length);
-  const parcelWidth  = parcelMode === 'default' ? DEFAULT_PARCEL.width  : (parcelWidthRaw  || DEFAULT_PARCEL.width);
-  const parcelHeight = parcelMode === 'default' ? DEFAULT_PARCEL.height : (parcelHeightRaw || DEFAULT_PARCEL.height);
-  const parcelWeight = parcelMode === 'default' ? DEFAULT_PARCEL.weight : (parcelWeightRaw || DEFAULT_PARCEL.weight);
+const parcelLength = parcelModeResolved === 'default' ? DEFAULT_PARCEL.length : (parcelLengthRaw || DEFAULT_PARCEL.length);
+const parcelWidth  = parcelModeResolved === 'default' ? DEFAULT_PARCEL.width  : (parcelWidthRaw  || DEFAULT_PARCEL.width);
+const parcelHeight = parcelModeResolved === 'default' ? DEFAULT_PARCEL.height : (parcelHeightRaw || DEFAULT_PARCEL.height);
+const parcelWeight = parcelModeResolved === 'default' ? DEFAULT_PARCEL.weight : (parcelWeightRaw || DEFAULT_PARCEL.weight);
 
   // Build shipment used for rating and (later) purchase
     const shipment = {
@@ -850,49 +877,55 @@ slackApp.view('returnlabel_edit_modal', async ({ ack, body, view, client, logger
   }
 
   // Get rates once (used by both branches)
-  let rates;
+let rates;
+try {
+  const rated = await createShipmentAndGetRates(shipment, logger);
+  rates = rated.rates || [];
+} catch (e) {
+  await ack(); // close modal
   try {
-    const rated = await createShipmentAndGetRates(shipment, logger);
-    rates = rated.rates || [];
+    await client.chat.postEphemeral({
+      channel: ephemeralChannelId,
+      user: ephemeralUserId,
+      text: `❌ Failed to fetch shipping services from Shippo: \`${e?.message || e}\``
+    });
+  } catch {}
+  return;
+}
+
+if (!Array.isArray(rates) || rates.length === 0) {
+  await ack(); // close modal
+  try {
+    await client.chat.postEphemeral({
+      channel: ephemeralChannelId,
+      user: ephemeralUserId,
+      text: `❌ No shipping services returned for this shipment. Please verify addresses and package dimensions.`
+    });
+  } catch {}
+  return;
+}
+
+// If user wants to choose, present the options and stop here.
+if (serviceMode === 'choose') {
+  await ack(); // close modal
+  try {
+    await client.chat.postEphemeral({
+      channel: ephemeralChannelId,
+      user: ephemeralUserId,
+      blocks: buildRateBlocks(rates),
+      text: 'Select a shipping service' // fallback
+    });
   } catch (e) {
-    await ack(); // close modal
     try {
-      await client.chat.postMessage({
-        channel: channelId,
-        text: `❌ Failed to fetch shipping services from Shippo: \`${e?.message || e}\``
-      });
-    } catch {}
-    return;
-  }
-
-  if (!Array.isArray(rates) || rates.length === 0) {
-    await ack(); // close modal
-    try {
-      await client.chat.postMessage({
-        channel: channelId,
-        text: `❌ No shipping services returned for this shipment. Please verify addresses and package dimensions.`
-      });
-    } catch {}
-    return;
-  }
-
-  // If user wants to choose, present the options and stop here.
-  if (serviceMode === 'choose') {
-    await ack(); // close modal
-    try {
-      await client.chat.postMessage({
-        channel: channelId,
-        blocks: buildRateBlocks(rates),
-        text: 'Select a shipping service' // fallback
-      });
-    } catch (e) {
-      await client.chat.postMessage({
-        channel: channelId,
+      await client.chat.postEphemeral({
+        channel: ephemeralChannelId,
+        user: ephemeralUserId,
         text: `❌ Failed to post shipping options: \`${e?.message || e}\``
       });
-    }
-    return;
+    } catch {}
   }
+  return;
+}
 
   // Default mode: try UPS Ground (but NOT UPS Ground Saver) first; if missing, fall back to choose flow.
   const upsGround = rates.find((r) => {
@@ -904,21 +937,25 @@ slackApp.view('returnlabel_edit_modal', async ({ ack, body, view, client, logger
   });
 
   if (!upsGround) {
-    await ack(); // close modal
+  await ack(); // close modal
+  try {
+    await client.chat.postEphemeral({
+      channel: ephemeralChannelId,
+      user: ephemeralUserId,
+      text: 'UPS Ground not available for this shipment. Please choose a service from the options below.',
+      blocks: buildRateBlocks(rates)
+    });
+  } catch (e) {
     try {
-      await client.chat.postMessage({
-        channel: channelId,
-        text: 'UPS Ground not available for this shipment. Please choose a service from the options below.',
-        blocks: buildRateBlocks(rates)
-      });
-    } catch (e) {
-      await client.chat.postMessage({
-        channel: channelId,
+      await client.chat.postEphemeral({
+        channel: ephemeralChannelId,
+        user: ephemeralUserId,
         text: `❌ Failed to post shipping options: \`${e?.message || e}\``
       });
-    }
-    return;
+    } catch {}
   }
+  return;
+}
 
   // Build review with the preselected UPS Ground
   const selectedRate = {
@@ -942,32 +979,30 @@ slackApp.view('returnlabel_edit_modal', async ({ ack, body, view, client, logger
   });
 
   const reviewTextLines = [
-    '*Ship From (raw):*',
-    '```', fromRawText, '```',
-    '*Ship From (parsed):*',
-    `Name: ${shipment.address_from.name || 'N/A'}`,
-    `Company: ${shipment.address_from.company || 'N/A'}`,
-    `Street: ${shipment.address_from.street1 || 'N/A'}`,
-    `Street 2: ${shipment.address_from.street2 || 'N/A'}`,
-    `City: ${shipment.address_from.city || 'N/A'}`,
-    `State: ${shipment.address_from.state || 'N/A'}`,
-    `ZIP: ${shipment.address_from.zip || 'N/A'}`,
-    '',
-    '*Ship To (parsed):*',
-    `Name: ${shipment.address_to.name || 'N/A'}`,
-    `Company: ${shipment.address_to.company || 'N/A'}`,
-    `Street: ${shipment.address_to.street1 || 'N/A'}`,
-    `Street 2: ${shipment.address_to.street2 || 'N/A'}`,
-    `City: ${shipment.address_to.city || 'N/A'}`,
-    `State: ${shipment.address_to.state || 'N/A'}`,
-    `ZIP: ${shipment.address_to.zip || 'N/A'}`,
-    '',
-    '*Parcel:*',
-    `${parcelLength}" x ${parcelWidth}" x ${parcelHeight}" (${parcelWeight} lb)`,
-    '',
-    '*Shipping Service:*',
-    `${selectedRate.provider} — ${selectedRate.service} — ${priceStr} — ETA: ${etaStr}`
-  ];
+  '*Ship From (parsed):*',
+  `Name: ${shipment.address_from.name || 'N/A'}`,
+  `Company: ${shipment.address_from.company || 'N/A'}`,
+  `Street: ${shipment.address_from.street1 || 'N/A'}`,
+  `Street 2: ${shipment.address_from.street2 || 'N/A'}`,
+  `City: ${shipment.address_from.city || 'N/A'}`,
+  `State: ${shipment.address_from.state || 'N/A'}`,
+  `ZIP: ${shipment.address_from.zip || 'N/A'}`,
+  '',
+  '*Ship To (parsed):*',
+  `Name: ${shipment.address_to.name || 'N/A'}`,
+  `Company: ${shipment.address_to.company || 'N/A'}`,
+  `Street: ${shipment.address_to.street1 || 'N/A'}`,
+  `Street 2: ${shipment.address_to.street2 || 'N/A'}`,
+  `City: ${shipment.address_to.city || 'N/A'}`,
+  `State: ${shipment.address_to.state || 'N/A'}`,
+  `ZIP: ${shipment.address_to.zip || 'N/A'}`,
+  '',
+  '*Parcel:*',
+  `${parcelLength}" x ${parcelWidth}" x ${parcelHeight}" (${parcelWeight} lb)`,
+  '',
+  '*Shipping Service:*',
+  `${selectedRate.provider} — ${selectedRate.service} — ${priceStr} — ETA: ${etaStr}`
+];
 
   // Update to review modal with selected UPS Ground
   await ack({
@@ -1022,18 +1057,24 @@ slackApp.action('service_option_select', async ({ ack, body, client, logger }) =
     selectedRate
   });
 
-  const reviewTextLines = [
-    '*Ship From:*',
-    `${shipment.address_from.name}`,
-    `${shipment.address_from.company || ''}`.trim(),
-    `${shipment.address_from.street1}`,
-    `${shipment.address_from.city}, ${shipment.address_from.state} ${shipment.address_from.zip}`,
+    const reviewTextLines = [
+    '*Ship From (parsed):*',
+    `Name: ${shipment.address_from.name || 'N/A'}`,
+    `Company: ${shipment.address_from.company || 'N/A'}`,
+    `Street: ${shipment.address_from.street1 || 'N/A'}`,
+    `Street 2: ${shipment.address_from.street2 || 'N/A'}`,
+    `City: ${shipment.address_from.city || 'N/A'}`,
+    `State: ${shipment.address_from.state || 'N/A'}`,
+    `ZIP: ${shipment.address_from.zip || 'N/A'}`,
     '',
-    '*Ship To:*',
-    `${shipment.address_to.name}`,
-    `${shipment.address_to.company || ''}`.trim(),
-    `${shipment.address_to.street1}`,
-    `${shipment.address_to.city}, ${shipment.address_to.state} ${shipment.address_to.zip}`,
+    '*Ship To (parsed):*',
+    `Name: ${shipment.address_to.name || 'N/A'}`,
+    `Company: ${shipment.address_to.company || 'N/A'}`,
+    `Street: ${shipment.address_to.street1 || 'N/A'}`,
+    `Street 2: ${shipment.address_to.street2 || 'N/A'}`,
+    `City: ${shipment.address_to.city || 'N/A'}`,
+    `State: ${shipment.address_to.state || 'N/A'}`,
+    `ZIP: ${shipment.address_to.zip || 'N/A'}`,
     '',
     '*Parcel:*',
     `${shipment.parcels[0].length}" x ${shipment.parcels[0].width}" x ${shipment.parcels[0].height}" (${shipment.parcels[0].weight} lb)`,
