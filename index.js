@@ -1220,19 +1220,22 @@ slackApp.view('shippinglabel_edit_modal', async ({ ack, body, view, client, logg
   // If user wants to choose, present the options and stop here.
   if (serviceMode === 'choose') {
     await ack(); // close modal
+
+    // Post a normal message in the same thread instead of an ephemeral,
+    // so it works even if WATCH_CHANNEL_ID != the slash command channel.
+    const postChannel = channelId || ephemeralChannelId;
+
     try {
-      await client.chat.postEphemeral({
-        channel: ephemeralChannelId,
-        user: ephemeralUserId,
+      await client.chat.postMessage({
+        channel: postChannel,
         blocks: buildRateBlocks(rates),
         text: 'Select a shipping service',
         thread_ts: threadTs
       });
     } catch (e) {
       try {
-        await client.chat.postEphemeral({
-          channel: ephemeralChannelId,
-          user: ephemeralUserId,
+        await client.chat.postMessage({
+          channel: postChannel,
           text: `❌ Failed to post shipping options: \`${e?.message || e}\``,
           thread_ts: threadTs
         });
@@ -1598,17 +1601,18 @@ slackApp.view('returnlabel_edit_modal', async ({ ack, body, view, client, logger
     ];
   }
 
-  // 9) If user explicitly wants to choose a service, just fetch rates and post the chooser.
+   // 9) If user explicitly wants to choose a service, just fetch rates and post the chooser.
   if (serviceMode === 'choose') {
+    const postChannel = channelId || ephemeralChannelId;
+
     let rates;
     try {
       const rated = await createShipmentAndGetRates(shipment, logger);
       rates = rated.rates || [];
     } catch (e) {
       try {
-        await client.chat.postEphemeral({
-          channel: ephemeralChannelId,
-          user: ephemeralUserId,
+        await client.chat.postMessage({
+          channel: postChannel,
           text: `❌ Failed to fetch shipping services from Shippo: \`${e?.message || e}\``,
           thread_ts: threadTs
         });
@@ -1620,9 +1624,8 @@ slackApp.view('returnlabel_edit_modal', async ({ ack, body, view, client, logger
 
     if (!Array.isArray(rates) || rates.length === 0) {
       try {
-        await client.chat.postEphemeral({
-          channel: ephemeralChannelId,
-          user: ephemeralUserId,
+        await client.chat.postMessage({
+          channel: postChannel,
           text:
             '❌ No shipping services returned for this shipment. Please verify addresses and package dimensions.',
           thread_ts: threadTs
@@ -1634,9 +1637,8 @@ slackApp.view('returnlabel_edit_modal', async ({ ack, body, view, client, logger
     }
 
     try {
-      await client.chat.postEphemeral({
-        channel: ephemeralChannelId,
-        user: ephemeralUserId,
+      await client.chat.postMessage({
+        channel: postChannel,
         blocks: buildRateBlocks(rates),
         text: 'Select a shipping service',
         thread_ts: threadTs
@@ -1644,9 +1646,8 @@ slackApp.view('returnlabel_edit_modal', async ({ ack, body, view, client, logger
     } catch (e2) {
       log.error?.('Failed to post shipping options (choose mode):', e2?.stack || e2?.message || e2);
       try {
-        await client.chat.postEphemeral({
-          channel: ephemeralChannelId,
-          user: ephemeralUserId,
+        await client.chat.postMessage({
+          channel: postChannel,
           text: `❌ Failed to post shipping options: \`${e2?.message || e2}\``,
           thread_ts: threadTs
         });
