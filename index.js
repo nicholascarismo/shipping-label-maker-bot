@@ -452,11 +452,11 @@ slackApp.error((e) => {
 ========================= */
 
 /**
- * /shippinglabel baseline handler
- * For now:
- *  - Acks promptly
- *  - Logs command usage into ./data/commands-log.json
- *  - Posts a confirmation message into WATCH_CHANNEL_ID (if set) or the invoking channel
+ * /shippinglabel handler
+ * Behaves like /returnlabel, but:
+ *  - Ship TO is a required multi-line address (no default option)
+ *  - Ship FROM uses Carismo default (with optional custom override)
+ *  - Order in the modal: Ship To first, then Ship From
  */
 slackApp.command('/shippinglabel', async ({ ack, body, client, logger }) => {
   await ack();
@@ -480,13 +480,208 @@ slackApp.command('/shippinglabel', async ({ ack, body, client, logger }) => {
     logger?.warn?.('Failed to log /shippinglabel command:', e);
   }
 
+  const privateMetadata = JSON.stringify({
+    channelId: targetChannel,
+    userChannelId: body.channel_id,
+    userId: body.user_id
+  });
+
   try {
-    await client.chat.postMessage({
-      channel: targetChannel,
-      text: '🚚 Received `/shippinglabel`. Baseline bot is running; shipping label flow will be implemented next.'
+    await client.views.open({
+      trigger_id: body.trigger_id,
+      view: {
+        type: 'modal',
+        callback_id: 'shippinglabel_edit_modal',
+        private_metadata: privateMetadata,
+        title: {
+          type: 'plain_text',
+          text: 'Shipping Label – Edit',
+          emoji: true
+        },
+        submit: {
+          type: 'plain_text',
+          text: 'Next',
+          emoji: true
+        },
+        close: {
+          type: 'plain_text',
+          text: 'Cancel',
+          emoji: true
+        },
+        blocks: [
+          {
+            type: 'section',
+            text: {
+              type: 'mrkdwn',
+              text: 'Configure the shipping label details, then click *Next*.'
+            }
+          },
+          { type: 'divider' },
+
+          /* Ship To (required, multi-line, no default option) */
+          {
+            type: 'input',
+            block_id: 'to_address_multiline_block',
+            label: { type: 'plain_text', text: 'Ship To (multi-line address)', emoji: true },
+            element: {
+              type: 'plain_text_input',
+              action_id: 'to_address_multiline',
+              multiline: true
+            },
+            hint: { type: 'plain_text', text: 'Lines: Name, Company (optional), Street, City, ST ZIP' },
+            optional: false
+          },
+
+          { type: 'divider' },
+
+          /* Ship From Mode (Carismo default with optional custom override) */
+          {
+            type: 'section',
+            block_id: 'from_address_mode_block',
+            text: { type: 'mrkdwn', text: '*Ship From address*' },
+            accessory: {
+              type: 'radio_buttons',
+              action_id: 'from_address_mode',
+              initial_option: {
+                text: { type: 'plain_text', text: 'Use default Carismo address', emoji: true },
+                value: 'default'
+              },
+              options: [
+                {
+                  text: { type: 'plain_text', text: 'Use default Carismo address', emoji: true },
+                  value: 'default'
+                },
+                {
+                  text: { type: 'plain_text', text: 'Enter a custom address', emoji: true },
+                  value: 'custom'
+                }
+              ]
+            }
+          },
+          {
+            type: 'input',
+            block_id: 'from_address_multiline_block',
+            label: { type: 'plain_text', text: 'Ship From (multi-line address)', emoji: true },
+            element: {
+              type: 'plain_text_input',
+              action_id: 'from_address_multiline',
+              multiline: true,
+              initial_value: ''
+            },
+            hint: { type: 'plain_text', text: 'Lines: Name, Company (optional), Street, City, ST ZIP' },
+            optional: true
+          },
+
+          { type: 'divider' },
+
+          /* Package Mode (same as /returnlabel) */
+          {
+            type: 'section',
+            block_id: 'parcel_mode_block',
+            text: { type: 'mrkdwn', text: '*Package info*' },
+            accessory: {
+              type: 'radio_buttons',
+              action_id: 'parcel_mode',
+              initial_option: {
+                text: { type: 'plain_text', text: 'Use default package (17" x 17" x 7", 8 lb)', emoji: true },
+                value: 'default'
+              },
+              options: [
+                {
+                  text: { type: 'plain_text', text: 'Use default package (17" x 17" x 7", 8 lb)', emoji: true },
+                  value: 'default'
+                },
+                {
+                  text: { type: 'plain_text', text: 'Enter custom package info', emoji: true },
+                  value: 'custom'
+                }
+              ]
+            }
+          },
+          {
+            type: 'input',
+            block_id: 'parcel_length_block',
+            label: { type: 'plain_text', text: 'Parcel Length (in)', emoji: true },
+            element: { type: 'plain_text_input', action_id: 'parcel_length', initial_value: '' },
+            optional: true
+          },
+          {
+            type: 'input',
+            block_id: 'parcel_width_block',
+            label: { type: 'plain_text', text: 'Parcel Width (in)', emoji: true },
+            element: { type: 'plain_text_input', action_id: 'parcel_width', initial_value: '' },
+            optional: true
+          },
+          {
+            type: 'input',
+            block_id: 'parcel_height_block',
+            label: { type: 'plain_text', text: 'Parcel Height (in)', emoji: true },
+            element: { type: 'plain_text_input', action_id: 'parcel_height', initial_value: '' },
+            optional: true
+          },
+          {
+            type: 'input',
+            block_id: 'parcel_weight_block',
+            label: { type: 'plain_text', text: 'Parcel Weight (lb)', emoji: true },
+            element: { type: 'plain_text_input', action_id: 'parcel_weight', initial_value: '' },
+            optional: true
+          },
+
+          { type: 'divider' },
+
+          /* Shipping Service Mode + Signature checkbox (same behavior as /returnlabel) */
+          {
+            type: 'section',
+            block_id: 'service_mode_block',
+            text: { type: 'mrkdwn', text: '*Shipping service*' },
+            accessory: {
+              type: 'radio_buttons',
+              action_id: 'service_mode',
+              initial_option: {
+                text: { type: 'plain_text', text: 'Use default (UPS Ground if available)', emoji: true },
+                value: 'default'
+              },
+              options: [
+                {
+                  text: { type: 'plain_text', text: 'Use default (UPS Ground if available)', emoji: true },
+                  value: 'default'
+                },
+                {
+                  text: { type: 'plain_text', text: 'Choose from available services', emoji: true },
+                  value: 'choose'
+                }
+              ]
+            }
+          },
+          {
+            type: 'input',
+            block_id: 'signature_block',
+            label: {
+              type: 'plain_text',
+              text: 'Signature requirement',
+              emoji: true
+            },
+            element: {
+              type: 'checkboxes',
+              action_id: 'signature_toggle',
+              options: [
+                {
+                  text: {
+                    type: 'plain_text',
+                    text: 'Check to NOT require signature (signature required by default)',
+                    emoji: true
+                  },
+                  value: 'no_signature'
+                }
+              ]
+            },
+            optional: true
+          }
+        ]
+      }
     });
   } catch (e) {
-    console.error('Failed to post /shippinglabel response:', e?.stack || e?.message || e);
+    console.error('Failed to open /shippinglabel edit modal:', e?.stack || e?.message || e);
   }
 });
 
@@ -717,6 +912,363 @@ const privateMetadata = JSON.stringify({
 });
 
 /**
+ * View submission handler for the "Edit Details" modal (shippinglabel).
+ * Same behavior as returnlabel_edit_modal, but:
+ *  - Ship To is required multi-line input (parsed)
+ *  - Ship From uses Carismo default with optional custom override
+ */
+slackApp.view('shippinglabel_edit_modal', async ({ ack, body, view, client, logger }) => {
+  const log = logger || console;
+
+  // Recover metadata (channelId, userChannelId, userId)
+  let channelId = null;
+  let userChannelId = null;
+  let userIdFromMeta = null;
+  try {
+    const meta = view.private_metadata ? JSON.parse(view.private_metadata) : {};
+    channelId = meta.channelId || null;
+    userChannelId = meta.userChannelId || null;
+    userIdFromMeta = meta.userId || null;
+  } catch (e) {
+    log.error?.('Failed to parse private_metadata in shipping edit modal:', e?.stack || e?.message || e);
+  }
+
+  const ephemeralChannelId = userChannelId || channelId || body.channel?.id || body.team?.id || undefined;
+  const ephemeralUserId = userIdFromMeta || body.user?.id;
+
+  const values = view.state.values;
+  const getVal = (b, a) => values[b]?.[a]?.value || '';
+
+  // Ship To (required, multi-line; no default)
+  const toAddressInputRaw = getVal('to_address_multiline_block', 'to_address_multiline') || '';
+  const toAddressTrimmed = toAddressInputRaw.trim();
+  if (!toAddressTrimmed) {
+    await ack({
+      response_action: 'errors',
+      errors: {
+        to_address_multiline_block: 'Ship To address is required.'
+      }
+    });
+    return;
+  }
+  const toRawText = toAddressTrimmed;
+
+  // Ship From mode and raw input (Carismo default with optional custom override)
+  const fromMode = values['from_address_mode_block']?.['from_address_mode']?.selected_option?.value || 'default';
+  const fromAddressInputRaw = getVal('from_address_multiline_block', 'from_address_multiline') || '';
+  const fromAddressTrimmed = fromAddressInputRaw.trim();
+
+  // If user typed anything, treat it as "custom" regardless of radio selection
+  const fromModeResolved = fromAddressTrimmed.length > 0 ? 'custom' : fromMode;
+
+  // Backend default is Carismo unless they typed something
+  const fromRawText =
+    fromModeResolved === 'default'
+      ? DEFAULT_FROM_ADDRESS_TEXT
+      : (fromAddressTrimmed || DEFAULT_FROM_ADDRESS_TEXT);
+
+  // Parse addresses
+  const parsedFrom = parseAddressMultiline(fromRawText);
+  const parsedTo = parseAddressMultiline(toRawText);
+
+  // Package mode & values (same logic as returnlabel)
+  const parcelMode = values['parcel_mode_block']?.['parcel_mode']?.selected_option?.value || 'default';
+  const parcelLengthRaw = getVal('parcel_length_block', 'parcel_length').trim();
+  const parcelWidthRaw  = getVal('parcel_width_block',  'parcel_width').trim();
+  const parcelHeightRaw = getVal('parcel_height_block', 'parcel_height').trim();
+  const parcelWeightRaw = getVal('parcel_weight_block', 'parcel_weight').trim();
+
+  const hasAnyParcelInput =
+    parcelLengthRaw.length > 0 ||
+    parcelWidthRaw.length > 0 ||
+    parcelHeightRaw.length > 0 ||
+    parcelWeightRaw.length > 0;
+
+  const parcelModeResolved = hasAnyParcelInput ? 'custom' : parcelMode;
+
+  if (parcelModeResolved === 'custom') {
+    const errors = {};
+    if (!parcelLengthRaw) errors['parcel_length_block'] = 'Required when using custom package info.';
+    if (!parcelWidthRaw)  errors['parcel_width_block']  = 'Required when using custom package info.';
+    if (!parcelHeightRaw) errors['parcel_height_block'] = 'Required when using custom package info.';
+    if (!parcelWeightRaw) errors['parcel_weight_block'] = 'Required when using custom package info.';
+    if (Object.keys(errors).length > 0) {
+      await ack({ response_action: 'errors', errors });
+      return;
+    }
+  }
+
+  const parcelLength = parcelModeResolved === 'default' ? DEFAULT_PARCEL.length : (parcelLengthRaw || DEFAULT_PARCEL.length);
+  const parcelWidth  = parcelModeResolved === 'default' ? DEFAULT_PARCEL.width  : (parcelWidthRaw  || DEFAULT_PARCEL.width);
+  const parcelHeight = parcelModeResolved === 'default' ? DEFAULT_PARCEL.height : (parcelHeightRaw || DEFAULT_PARCEL.height);
+  const parcelWeight = parcelModeResolved === 'default' ? DEFAULT_PARCEL.weight : (parcelWeightRaw || DEFAULT_PARCEL.weight);
+
+  // Signature requirement:
+  // - Default: require STANDARD signature
+  // - If checkbox is checked → do NOT require signature (omit signature_confirmation)
+  const signatureSelection =
+    values['signature_block']?.['signature_toggle']?.selected_options || [];
+  const requireSignature = !Array.isArray(signatureSelection) || signatureSelection.length === 0;
+
+  // Build shipment used for rating and (later) purchase
+  const shipment = {
+    address_from: {
+      // Default name is Carismo Design (not "Returns Department")
+      name: parsedFrom.name || 'Carismo Design',
+      company: parsedFrom.company || '',
+      street1: parsedFrom.street1 || '71 Winant Place (Suite B)',
+      street2: parsedFrom.street2 || '',
+      city: parsedFrom.city || 'Staten Island',
+      state: parsedFrom.state || 'NY',
+      zip: parsedFrom.zip || '10309',
+      country: 'US',
+      phone: '+1 555 555 5555',
+      email: 'test-sender@example.com'
+    },
+    address_to: {
+      name: parsedTo.name || '',
+      company: parsedTo.company || '',
+      street1: parsedTo.street1 || '',
+      street2: parsedTo.street2 || '',
+      city: parsedTo.city || '',
+      state: parsedTo.state || '',
+      zip: parsedTo.zip || '',
+      country: 'US',
+      phone: '+1 555 111 2222',
+      email: 'test-recipient@example.com'
+    },
+    parcels: [
+      {
+        length: parcelLength,
+        width: parcelWidth,
+        height: parcelHeight,
+        distance_unit: 'in',
+        weight: parcelWeight,
+        mass_unit: 'lb'
+      }
+    ],
+    async: false
+  };
+
+  // Attach signature requirement to shipment.extra if needed
+  if (requireSignature) {
+    shipment.extra = {
+      signature_confirmation: 'STANDARD'
+    };
+  }
+
+  // Service mode
+  const serviceMode = values['service_mode_block']?.['service_mode']?.selected_option?.value || 'default';
+
+  // Helper to format rates into blocks (list + buttons) – SHIPPING FLOW
+  function buildRateBlocks(ratesArr) {
+    const lines = ratesArr.map((r, idx) => {
+      const provider = r.provider || r.carrier || (r.carrier_account && r.carrier_account.carrier) || 'Unknown';
+      const service  = (r.servicelevel && r.servicelevel.name) || r.servicelevel_name || r.service || 'Unknown';
+      const amountNum = r.amount ? Number(r.amount) : null;
+      const price = amountNum != null && !Number.isNaN(amountNum)
+        ? (r.currency === 'USD' ? `$${amountNum.toFixed(2)}` : `${amountNum.toFixed(2)} ${r.currency || ''}`.trim())
+        : 'N/A';
+      const eta = typeof r.estimated_days === 'number'
+        ? `${r.estimated_days} business day${r.estimated_days === 1 ? '' : 's'}`
+        : 'ETA N/A';
+      return `${idx + 1}. *${provider}* — ${service} — ${price} — ${eta}`;
+    });
+
+    const actionBlocks = [];
+
+    // ONE button per actions block to avoid duplicate action_id errors
+    for (const r of ratesArr) {
+      const provider = r.provider || r.carrier || (r.carrier_account && r.carrier_account.carrier) || 'Unknown';
+      const service  = (r.servicelevel && r.servicelevel.name) || r.servicelevel_name || r.service || 'Unknown';
+      const valuePayload = {
+        flow: 'shippinglabel',
+        channelId,
+        shipment,
+        selectedRate: {
+          id: r.object_id,
+          provider,
+          service,
+          amount: r.amount || null,
+          currency: r.currency || 'USD',
+          etaDays: typeof r.estimated_days === 'number' ? r.estimated_days : null
+        }
+      };
+
+      actionBlocks.push({
+        type: 'actions',
+        elements: [
+          {
+            type: 'button',
+            action_id: 'service_option_select',
+            text: { type: 'plain_text', text: `${provider} – ${service}`, emoji: true },
+            value: JSON.stringify(valuePayload)
+          }
+        ]
+      });
+    }
+
+    return [
+      {
+        type: 'section',
+        text: { type: 'mrkdwn', text: '*Select a shipping service for this shipping label:*' }
+      },
+      {
+        type: 'section',
+        text: { type: 'mrkdwn', text: lines.join('\n') || '_No services available._' }
+      },
+      ...actionBlocks
+    ];
+  }
+
+  // Get rates once (used by both branches)
+  let rates;
+  try {
+    const rated = await createShipmentAndGetRates(shipment, logger);
+    rates = rated.rates || [];
+  } catch (e) {
+    await ack(); // close modal
+    try {
+      await client.chat.postEphemeral({
+        channel: ephemeralChannelId,
+        user: ephemeralUserId,
+        text: `❌ Failed to fetch shipping services from Shippo: \`${e?.message || e}\``
+      });
+    } catch {}
+    return;
+  }
+
+  if (!Array.isArray(rates) || rates.length === 0) {
+    await ack(); // close modal
+    try {
+      await client.chat.postEphemeral({
+        channel: ephemeralChannelId,
+        user: ephemeralUserId,
+        text: `❌ No shipping services returned for this shipment. Please verify addresses and package dimensions.`
+      });
+    } catch {}
+    return;
+  }
+
+  // If user wants to choose, present the options and stop here.
+  if (serviceMode === 'choose') {
+    await ack(); // close modal
+    try {
+      await client.chat.postEphemeral({
+        channel: ephemeralChannelId,
+        user: ephemeralUserId,
+        blocks: buildRateBlocks(rates),
+        text: 'Select a shipping service' // fallback
+      });
+    } catch (e) {
+      try {
+        await client.chat.postEphemeral({
+          channel: ephemeralChannelId,
+          user: ephemeralUserId,
+          text: `❌ Failed to post shipping options: \`${e?.message || e}\``
+        });
+      } catch {}
+    }
+    return;
+  }
+
+  // Default mode: try UPS Ground (but NOT UPS Ground Saver) first; if missing, fall back to choose flow.
+  const upsGround = rates.find((r) => {
+    const provider = (r.provider || r.carrier || (r.carrier_account && r.carrier_account.carrier) || '').toLowerCase();
+    const service  = ((r.servicelevel && r.servicelevel.name) || r.servicelevel_name || r.service || '').toLowerCase();
+
+    // Require UPS + "ground" in the service name, but explicitly exclude any "saver" variants.
+    return provider === 'ups' && service.includes('ground') && !service.includes('saver');
+  });
+
+  if (!upsGround) {
+    await ack(); // close modal
+    try {
+      await client.chat.postEphemeral({
+        channel: ephemeralChannelId,
+        user: ephemeralUserId,
+        text: 'UPS Ground not available for this shipment. Please choose a service from the options below.',
+        blocks: buildRateBlocks(rates)
+      });
+    } catch (e) {
+      try {
+        await client.chat.postEphemeral({
+          channel: ephemeralChannelId,
+          user: ephemeralUserId,
+          text: `❌ Failed to post shipping options: \`${e?.message || e}\``
+        });
+      } catch {}
+    }
+    return;
+  }
+
+  // Build review with the preselected UPS Ground
+  const selectedRate = {
+    id: upsGround.object_id,
+    provider: upsGround.provider || upsGround.carrier || (upsGround.carrier_account && upsGround.carrier_account.carrier) || 'UPS',
+    service: (upsGround.servicelevel && upsGround.servicelevel.name) || upsGround.servicelevel_name || upsGround.service || 'Ground',
+    amount: upsGround.amount || null,
+    currency: upsGround.currency || 'USD',
+    etaDays: typeof upsGround.estimated_days === 'number' ? upsGround.estimated_days : null
+  };
+
+  const priceStr = selectedRate.amount
+    ? (selectedRate.currency === 'USD' ? `$${Number(selectedRate.amount).toFixed(2)}` : `${Number(selectedRate.amount).toFixed(2)} ${selectedRate.currency}`)
+    : 'N/A';
+  const etaStr = selectedRate.etaDays != null ? `${selectedRate.etaDays} business day${selectedRate.etaDays === 1 ? '' : 's'}` : 'N/A';
+
+  const reviewMetadata = JSON.stringify({
+    channelId,
+    shipment,
+    selectedRate
+  });
+
+  const reviewTextLines = [
+    '*Ship From (parsed):*',
+    `Name: ${shipment.address_from.name || 'N/A'}`,
+    `Company: ${shipment.address_from.company || 'N/A'}`,
+    `Street: ${shipment.address_from.street1 || 'N/A'}`,
+    `Street 2: ${shipment.address_from.street2 || 'N/A'}`,
+    `City: ${shipment.address_from.city || 'N/A'}`,
+    `State: ${shipment.address_from.state || 'N/A'}`,
+    `ZIP: ${shipment.address_from.zip || 'N/A'}`,
+    '',
+    '*Ship To (parsed):*',
+    `Name: ${shipment.address_to.name || 'N/A'}`,
+    `Company: ${shipment.address_to.company || 'N/A'}`,
+    `Street: ${shipment.address_to.street1 || 'N/A'}`,
+    `Street 2: ${shipment.address_to.street2 || 'N/A'}`,
+    `City: ${shipment.address_to.city || 'N/A'}`,
+    `State: ${shipment.address_to.state || 'N/A'}`,
+    `ZIP: ${shipment.address_to.zip || 'N/A'}`,
+    '',
+    '*Parcel:*',
+    `${parcelLength}" x ${parcelWidth}" x ${parcelHeight}" (${parcelWeight} lb)`,
+    '',
+    '*Shipping Service:*',
+    `${selectedRate.provider} — ${selectedRate.service} — ${priceStr} — ETA: ${etaStr}`
+  ];
+
+  // Update to review modal with selected UPS Ground
+  await ack({
+    response_action: 'update',
+    view: {
+      type: 'modal',
+      callback_id: 'shippinglabel_review_modal',
+      private_metadata: reviewMetadata,
+      title: { type: 'plain_text', text: 'Shipping Label – Review', emoji: true },
+      submit: { type: 'plain_text', text: 'Create Label', emoji: true },
+      close:  { type: 'plain_text', text: 'Back', emoji: true },
+      blocks: [
+        { type: 'section', text: { type: 'mrkdwn', text: 'Please review the details below.' } },
+        { type: 'divider' },
+        { type: 'section', text: { type: 'mrkdwn', text: reviewTextLines.join('\n') } }
+      ]
+    }
+  });
+});
+
+/**
  * View submission handler for the "Edit Details" modal.
  * Builds a shipment object. If service_mode=choose, posts rate options with buttons.
  * If service_mode=default, tries UPS Ground; if missing, posts rate options.
@@ -854,7 +1406,7 @@ const requireSignature = !Array.isArray(signatureSelection) || signatureSelectio
   // Service mode
   const serviceMode = values['service_mode_block']?.['service_mode']?.selected_option?.value || 'default';
 
-  // Helper to format rates into blocks (list + buttons)
+    // Helper to format rates into blocks (list + buttons) – RETURN FLOW
   function buildRateBlocks(ratesArr) {
     const lines = ratesArr.map((r, idx) => {
       const provider = r.provider || r.carrier || (r.carrier_account && r.carrier_account.carrier) || 'Unknown';
@@ -876,6 +1428,7 @@ const requireSignature = !Array.isArray(signatureSelection) || signatureSelectio
       const provider = r.provider || r.carrier || (r.carrier_account && r.carrier_account.carrier) || 'Unknown';
       const service  = (r.servicelevel && r.servicelevel.name) || r.servicelevel_name || r.service || 'Unknown';
       const valuePayload = {
+        flow: 'returnlabel',
         channelId,
         shipment,
         selectedRate: {
@@ -1063,7 +1616,7 @@ if (serviceMode === 'choose') {
 
 /**
  * Button handler: user picks a specific shipping service option.
- * Opens the Review modal with the chosen rate.
+ * Opens the appropriate Review modal (shipping or return) with the chosen rate.
  */
 slackApp.action('service_option_select', async ({ ack, body, client, logger }) => {
   await ack();
@@ -1082,6 +1635,7 @@ slackApp.action('service_option_select', async ({ ack, body, client, logger }) =
     return;
   }
 
+  const flow = payload.flow || 'returnlabel';
   const { channelId, shipment, selectedRate } = payload;
 
   const priceStr = selectedRate.amount
@@ -1095,7 +1649,7 @@ slackApp.action('service_option_select', async ({ ack, body, client, logger }) =
     selectedRate
   });
 
-    const reviewTextLines = [
+  const reviewTextLines = [
     '*Ship From (parsed):*',
     `Name: ${shipment.address_from.name || 'N/A'}`,
     `Company: ${shipment.address_from.company || 'N/A'}`,
@@ -1121,14 +1675,19 @@ slackApp.action('service_option_select', async ({ ack, body, client, logger }) =
     `${selectedRate.provider} — ${selectedRate.service} — ${priceStr} — ETA: ${etaStr}`
   ];
 
+  const reviewCallbackId =
+    flow === 'shippinglabel' ? 'shippinglabel_review_modal' : 'returnlabel_review_modal';
+  const reviewTitleText =
+    flow === 'shippinglabel' ? 'Shipping Label – Review' : 'Return Label – Review';
+
   try {
     await client.views.open({
       trigger_id: body.trigger_id,
       view: {
         type: 'modal',
-        callback_id: 'returnlabel_review_modal',
+        callback_id: reviewCallbackId,
         private_metadata: reviewMetadata,
-        title: { type: 'plain_text', text: 'Return Label – Review', emoji: true },
+        title: { type: 'plain_text', text: reviewTitleText, emoji: true },
         submit: { type: 'plain_text', text: 'Create Label', emoji: true },
         close:  { type: 'plain_text', text: 'Cancel', emoji: true },
         blocks: [
@@ -1144,6 +1703,136 @@ slackApp.action('service_option_select', async ({ ack, body, client, logger }) =
       await client.chat.postMessage({
         channel: channelId,
         text: `❌ Failed to open Review modal: \`${e?.message || e}\``
+      });
+    } catch {}
+  }
+});
+
+/**
+ * View submission handler for the "Review" modal (shippinglabel).
+ * If a selectedRate is present, buys that exact rate; else uses fallback createReturnLabelWithShippo.
+ * Then downloads the PDF and uploads it to Slack with carrier/service/ETA.
+ */
+slackApp.view('shippinglabel_review_modal', async ({ ack, body, view, client, logger }) => {
+  // Close/submit the modal
+  await ack();
+
+  const log = logger || console;
+
+  let channelId = null;
+  let shipment = null;
+  let selectedRate = null;
+
+  try {
+    const meta = view.private_metadata ? JSON.parse(view.private_metadata) : {};
+    channelId = meta.channelId || null;
+    shipment = meta.shipment || null;
+    selectedRate = meta.selectedRate || null;
+  } catch (e) {
+    log.error?.('Failed to parse private_metadata in shipping review modal:', e?.stack || e?.message || e);
+  }
+
+  if (!channelId || !shipment) {
+    log.error?.('Missing channelId or shipment data in shipping review modal.');
+    return;
+  }
+
+  // 1) Buy label (selected rate if provided; else default flow)
+  let trackingNumber, labelUrl, trackingUrl;
+  let carrierOut = null, serviceOut = null, etaDaysOut = null;
+
+  try {
+    if (selectedRate?.id) {
+      const tx = await buyLabelForRate(selectedRate.id, logger);
+      trackingNumber = tx.trackingNumber;
+      labelUrl = tx.labelUrl;
+      trackingUrl = tx.trackingUrl;
+      carrierOut = selectedRate.provider || null;
+      serviceOut = selectedRate.service || null;
+      etaDaysOut = typeof selectedRate.etaDays === 'number' ? selectedRate.etaDays : null;
+    } else {
+      // Reuse the same generic helper; despite the name it creates a shipment + label
+      const label = await createReturnLabelWithShippo(shipment, logger);
+      trackingNumber = label.trackingNumber;
+      labelUrl = label.labelUrl;
+      trackingUrl = label.trackingUrl;
+      carrierOut = label.carrierName || null;
+      serviceOut = label.serviceName || null;
+      etaDaysOut = typeof label.etaDays === 'number' ? label.etaDays : null;
+    }
+  } catch (e) {
+    const msg = e?.message || String(e);
+    console.error('Failed to create Shippo shipping label:', e?.stack || msg);
+    try {
+      await client.chat.postMessage({
+        channel: channelId,
+        text: `❌ Failed to create Shippo shipping label: \`${msg}\``
+      });
+    } catch {}
+    return;
+  }
+
+  const etaDescription =
+    typeof etaDaysOut === 'number'
+      ? `${etaDaysOut} business day${etaDaysOut === 1 ? '' : 's'} (estimated)`
+      : 'N/A';
+
+  // 2) Download the PDF from Shippo
+  let pdfBuffer;
+  try {
+    const pdfRes = await fetch(labelUrl);
+    if (!pdfRes.ok) {
+      const txt = await pdfRes.text();
+      throw new Error(`Download failed ${pdfRes.status}: ${txt}`);
+    }
+    const pdfArrayBuf = await pdfRes.arrayBuffer();
+    pdfBuffer = Buffer.from(pdfArrayBuf);
+  } catch (e) {
+    const msg = e?.message || String(e);
+    console.error('Failed to download Shippo shipping label PDF:', e?.stack || msg);
+    try {
+      await client.chat.postMessage({
+        channel: channelId,
+        text:
+          `✅ Created Shippo shipping label, but failed to download the PDF.\n` +
+          `*Tracking number:* ${trackingNumber || 'N/A'}\n` +
+          `*Carrier:* ${carrierOut || 'N/A'}\n` +
+          `*Service:* ${serviceOut || 'N/A'}\n` +
+          `*ETA:* ${etaDescription}\n` +
+          `Tracking URL: ${trackingUrl || 'N/A'}\n` +
+          `Error downloading PDF: \`${msg}\``
+      });
+    } catch {}
+    return;
+  }
+
+  // 3) Upload the PDF into Slack
+  try {
+    await client.files.uploadV2({
+      channel_id: channelId,
+      filename: 'shipping-label.pdf',
+      file: pdfBuffer,
+      initial_comment:
+        `📦 *Shipping label created*\n` +
+        `• *Tracking number:* ${trackingNumber || 'N/A'}\n` +
+        `• *Carrier:* ${carrierOut || 'N/A'}\n` +
+        `• *Service:* ${serviceOut || 'N/A'}\n` +
+        `• *ETA:* ${etaDescription}`
+    });
+  } catch (e) {
+    const msg = e?.message || String(e);
+    console.error('Failed to upload shipping label PDF to Slack:', e?.stack || msg);
+    try {
+      await client.chat.postMessage({
+        channel: channelId,
+        text:
+          `✅ Created Shippo shipping label, but failed to upload the PDF to Slack.\n` +
+          `*Tracking number:* ${trackingNumber || 'N/A'}\n` +
+          `*Carrier:* ${carrierOut || 'N/A'}\n` +
+          `*Service:* ${serviceOut || 'N/A'}\n` +
+          `*ETA:* ${etaDescription}\n` +
+          `Tracking URL: ${trackingUrl || 'N/A'}\n` +
+          `Upload error: \`${msg}\``
       });
     } catch {}
   }
