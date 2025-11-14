@@ -75,6 +75,110 @@ async function appendCommandLog(entry) {
   }
 }
 
+const DEFAULT_FROM_ADDRESS_TEXT = `Carismo Design
+71 Winant Place (Suite B)
+Staten Island, NY 10309`;
+
+const DEFAULT_TO_ADDRESS_TEXT = `Returns Department
+Carismo Design
+71 Winant Place (Suite B)
+Staten Island, NY 10309`;
+
+/**
+ * Very simple US multi-line address parser.
+ * Expects lines like:
+ *   [0] Name
+ *   [1] (optional) Company
+ *   [2] Street
+ *   [last] City, ST ZIP
+ */
+function parseAddressMultiline(raw) {
+  const empty = {
+    name: '',
+    company: '',
+    street1: '',
+    city: '',
+    state: '',
+    zip: ''
+  };
+
+  if (!raw || typeof raw !== 'string') {
+    return empty;
+  }
+
+  const lines = raw
+    .split('\n')
+    .map((l) => l.trim())
+    .filter((l) => l.length > 0);
+
+  if (lines.length === 0) {
+    return empty;
+  }
+
+  const cityStateZipLine = lines[lines.length - 1];
+  let city = '';
+  let state = '';
+  let zip = '';
+
+  // Try "City, ST ZIP"
+  const commaIdx = cityStateZipLine.indexOf(',');
+  if (commaIdx !== -1) {
+    city = cityStateZipLine.slice(0, commaIdx).trim();
+    const stateZipPart = cityStateZipLine.slice(commaIdx + 1).trim();
+    const parts = stateZipPart.split(/\s+/);
+    if (parts.length >= 2) {
+      state = parts[0];
+      zip = parts[parts.length - 1];
+    } else if (parts.length === 1) {
+      state = parts[0];
+    }
+  } else {
+    // Fallback: maybe "City ST ZIP" or similar
+    const parts = cityStateZipLine.split(/\s+/);
+    if (parts.length >= 3) {
+      city = parts.slice(0, parts.length - 2).join(' ');
+      state = parts[parts.length - 2];
+      zip = parts[parts.length - 1];
+    }
+  }
+
+  let name = '';
+  let company = '';
+  let street1 = '';
+
+  if (lines.length === 4) {
+    // 0: name, 1: company, 2: street, 3: city/state/zip
+    name = lines[0];
+    company = lines[1];
+    street1 = lines[2];
+  } else if (lines.length === 3) {
+    // 0: name, 1: street, 2: city/state/zip
+    name = lines[0];
+    company = '';
+    street1 = lines[1];
+  } else if (lines.length >= 5) {
+    // 0: name, 1: company, 2: street, ... , last: city/state/zip
+    name = lines[0];
+    company = lines[1];
+    street1 = lines[2];
+  } else if (lines.length === 2) {
+    // 0: name, 1: something else
+    name = lines[0];
+    company = lines[1];
+  } else if (lines.length === 1) {
+    name = lines[0];
+  }
+
+  return {
+    name: name || '',
+    company: company || '',
+    street1: street1 || '',
+    city: city || '',
+    state: state || '',
+    zip: zip || ''
+  };
+}
+
 /**
  * Create a return label via Shippo using the provided shipment data.
  * Returns { trackingNumber, labelUrl, trackingUrl, carrierName, serviceName, etaDays } on success.
@@ -300,169 +404,83 @@ slackApp.command('/returnlabel', async ({ ack, body, client, logger }) => {
           text: 'Cancel',
           emoji: true
         },
-        blocks: [
+                blocks: [
           {
             type: 'section',
             text: {
               type: 'mrkdwn',
-              text: 'Edit the return label details, then click *Next* to review before creating the label.'
+              text: 'Configure the return label details, then click *Next* to review before creating the label.'
             }
           },
           {
             type: 'divider'
           },
           {
-            type: 'input',
-            block_id: 'from_name_block',
-            label: {
-              type: 'plain_text',
-              text: 'From Name',
-              emoji: true
+            type: 'section',
+            block_id: 'from_address_mode_block',
+            text: {
+              type: 'mrkdwn',
+              text: '*Ship From address*'
             },
-            element: {
-              type: 'plain_text_input',
-              action_id: 'from_name',
-              initial_value: 'Carismo Returns (TEST)'
+            accessory: {
+              type: 'radio_buttons',
+              action_id: 'from_address_mode',
+              initial_option: {
+                text: {
+                  type: 'plain_text',
+                  text: 'Use default Carismo address',
+                  emoji: true
+                },
+                value: 'default'
+              },
+              options: [
+                {
+                  text: {
+                    type: 'plain_text',
+                    text: 'Use default Carismo address',
+                    emoji: true
+                  },
+                  value: 'default'
+                },
+                {
+                  text: {
+                    type: 'plain_text',
+                    text: 'Enter a custom address',
+                    emoji: true
+                  },
+                  value: 'custom'
+                }
+              ]
             }
           },
           {
             type: 'input',
-            block_id: 'from_company_block',
+            block_id: 'from_address_multiline_block',
             label: {
               type: 'plain_text',
-              text: 'From Company',
+              text: 'Ship From (multi-line address)',
               emoji: true
             },
             element: {
               type: 'plain_text_input',
-              action_id: 'from_company',
-              initial_value: 'Carismo Design'
+              action_id: 'from_address_multiline',
+              multiline: true,
+              initial_value: DEFAULT_FROM_ADDRESS_TEXT
+            },
+            hint: {
+              type: 'plain_text',
+              text: 'Example lines: Name, Company (optional), Street, City, ST ZIP'
             }
           },
           {
-            type: 'input',
-            block_id: 'from_street1_block',
-            label: {
-              type: 'plain_text',
-              text: 'From Street',
-              emoji: true
-            },
-            element: {
-              type: 'plain_text_input',
-              action_id: 'from_street1',
-              initial_value: '215 Clayton St.'
-            }
-          },
-          {
-            type: 'input',
-            block_id: 'from_city_block',
-            label: {
-              type: 'plain_text',
-              text: 'From City',
-              emoji: true
-            },
-            element: {
-              type: 'plain_text_input',
-              action_id: 'from_city',
-              initial_value: 'San Francisco'
-            }
-          },
-          {
-            type: 'input',
-            block_id: 'from_state_block',
-            label: {
-              type: 'plain_text',
-              text: 'From State (2-letter)',
-              emoji: true
-            },
-            element: {
-              type: 'plain_text_input',
-              action_id: 'from_state',
-              initial_value: 'CA'
-            }
-          },
-          {
-            type: 'input',
-            block_id: 'from_zip_block',
-            label: {
-              type: 'plain_text',
-              text: 'From ZIP',
-              emoji: true
-            },
-            element: {
-              type: 'plain_text_input',
-              action_id: 'from_zip',
-              initial_value: '94117'
-            }
-          },
-          {
-            type: 'input',
-            block_id: 'to_name_block',
-            label: {
-              type: 'plain_text',
-              text: 'To Name',
-              emoji: true
-            },
-            element: {
-              type: 'plain_text_input',
-              action_id: 'to_name',
-              initial_value: 'Test Customer'
-            }
-          },
-          {
-            type: 'input',
-            block_id: 'to_street1_block',
-            label: {
-              type: 'plain_text',
-              text: 'To Street',
-              emoji: true
-            },
-            element: {
-              type: 'plain_text_input',
-              action_id: 'to_street1',
-              initial_value: '965 Mission St'
-            }
-          },
-          {
-            type: 'input',
-            block_id: 'to_city_block',
-            label: {
-              type: 'plain_text',
-              text: 'To City',
-              emoji: true
-            },
-            element: {
-              type: 'plain_text_input',
-              action_id: 'to_city',
-              initial_value: 'San Francisco'
-            }
-          },
-          {
-            type: 'input',
-            block_id: 'to_state_block',
-            label: {
-              type: 'plain_text',
-              text: 'To State (2-letter)',
-              emoji: true
-            },
-            element: {
-              type: 'plain_text_input',
-              action_id: 'to_state',
-              initial_value: 'CA'
-            }
-          },
-          {
-            type: 'input',
-            block_id: 'to_zip_block',
-            label: {
-              type: 'plain_text',
-              text: 'To ZIP',
-              emoji: true
-            },
-            element: {
-              type: 'plain_text_input',
-              action_id: 'to_zip',
-              initial_value: '94103'
+            type: 'section',
+            text: {
+              type: 'mrkdwn',
+              text:
+                '*Ship To (fixed):*\n' +
+                '```' +
+                DEFAULT_TO_ADDRESS_TEXT +
+                '```'
             }
           },
           {
@@ -535,6 +553,7 @@ slackApp.command('/returnlabel', async ({ ack, body, client, logger }) => {
 /**
  * View submission handler for the "Edit Details" modal.
  * Builds a shipment object and updates the modal into a "Review" modal.
+ * Uses multi-line addresses, parses them, and shows parsed values in the review.
  */
 slackApp.view('returnlabel_edit_modal', async ({ ack, body, view, client, logger }) => {
   const log = logger || console;
@@ -552,45 +571,52 @@ slackApp.view('returnlabel_edit_modal', async ({ ack, body, view, client, logger
   const values = view.state.values;
 
   function getVal(blockId, actionId) {
-    return values[blockId]?.[actionId]?.value?.trim() || '';
+    return values[blockId]?.[actionId]?.value || '';
   }
 
-  const fromName = getVal('from_name_block', 'from_name');
-  const fromCompany = getVal('from_company_block', 'from_company');
-  const fromStreet1 = getVal('from_street1_block', 'from_street1');
-  const fromCity = getVal('from_city_block', 'from_city');
-  const fromState = getVal('from_state_block', 'from_state');
-  const fromZip = getVal('from_zip_block', 'from_zip');
+  // Ship From mode: default vs custom
+  const fromMode =
+    values['from_address_mode_block']?.['from_address_mode']?.selected_option?.value || 'default';
 
-  const toName = getVal('to_name_block', 'to_name');
-  const toStreet1 = getVal('to_street1_block', 'to_street1');
-  const toCity = getVal('to_city_block', 'to_city');
-  const toState = getVal('to_state_block', 'to_state');
-  const toZip = getVal('to_zip_block', 'to_zip');
+  const fromAddressInputRaw =
+    getVal('from_address_multiline_block', 'from_address_multiline') || '';
 
-  const parcelLength = getVal('parcel_length_block', 'parcel_length');
-  const parcelWidth = getVal('parcel_width_block', 'parcel_width');
-  const parcelHeight = getVal('parcel_height_block', 'parcel_height');
-  const parcelWeight = getVal('parcel_weight_block', 'parcel_weight');
+  const fromRawText =
+    fromMode === 'default'
+      ? DEFAULT_FROM_ADDRESS_TEXT
+      : (fromAddressInputRaw.trim() || DEFAULT_FROM_ADDRESS_TEXT);
+
+  // Ship To is always fixed
+  const toRawText = DEFAULT_TO_ADDRESS_TEXT;
+
+  // Parse both addresses into components
+  const parsedFrom = parseAddressMultiline(fromRawText);
+  const parsedTo = parseAddressMultiline(toRawText);
+
+  const parcelLength = getVal('parcel_length_block', 'parcel_length').trim();
+  const parcelWidth = getVal('parcel_width_block', 'parcel_width').trim();
+  const parcelHeight = getVal('parcel_height_block', 'parcel_height').trim();
+  const parcelWeight = getVal('parcel_weight_block', 'parcel_weight').trim();
 
   const shipment = {
     address_from: {
-      name: fromName || 'Carismo Returns (TEST)',
-      company: fromCompany || 'Carismo Design',
-      street1: fromStreet1 || '215 Clayton St.',
-      city: fromCity || 'San Francisco',
-      state: fromState || 'CA',
-      zip: fromZip || '94117',
+      name: parsedFrom.name || 'Carismo Design',
+      company: parsedFrom.company || '',
+      street1: parsedFrom.street1 || '71 Winant Place (Suite B)',
+      city: parsedFrom.city || 'Staten Island',
+      state: parsedFrom.state || 'NY',
+      zip: parsedFrom.zip || '10309',
       country: 'US',
       phone: '+1 555 555 5555',
       email: 'test-sender@example.com'
     },
     address_to: {
-      name: toName || 'Test Customer',
-      street1: toStreet1 || '965 Mission St',
-      city: toCity || 'San Francisco',
-      state: toState || 'CA',
-      zip: toZip || '94103',
+      name: parsedTo.name || 'Returns Department',
+      company: parsedTo.company || 'Carismo Design',
+      street1: parsedTo.street1 || '71 Winant Place (Suite B)',
+      city: parsedTo.city || 'Staten Island',
+      state: parsedTo.state || 'NY',
+      zip: parsedTo.zip || '10309',
       country: 'US',
       phone: '+1 555 111 2222',
       email: 'test-recipient@example.com'
@@ -614,16 +640,29 @@ slackApp.view('returnlabel_edit_modal', async ({ ack, body, view, client, logger
   });
 
   const reviewTextLines = [
-    '*From:*',
-    `${shipment.address_from.name}`,
-    `${shipment.address_from.company}`,
-    `${shipment.address_from.street1}`,
-    `${shipment.address_from.city}, ${shipment.address_from.state} ${shipment.address_from.zip}`,
+    '*Ship From (raw):*',
+    '```',
+    fromRawText,
+    '```',
+    '*Ship From (parsed):*',
+    `Name: ${parsedFrom.name || 'N/A'}`,
+    `Company: ${parsedFrom.company || 'N/A'}`,
+    `Street: ${parsedFrom.street1 || 'N/A'}`,
+    `City: ${parsedFrom.city || 'N/A'}`,
+    `State: ${parsedFrom.state || 'N/A'}`,
+    `ZIP: ${parsedFrom.zip || 'N/A'}`,
     '',
-    '*To:*',
-    `${shipment.address_to.name}`,
-    `${shipment.address_to.street1}`,
-    `${shipment.address_to.city}, ${shipment.address_to.state} ${shipment.address_to.zip}`,
+    '*Ship To (raw):*',
+    '```',
+    toRawText,
+    '```',
+    '*Ship To (parsed):*',
+    `Name: ${parsedTo.name || 'N/A'}`,
+    `Company: ${parsedTo.company || 'N/A'}`,
+    `Street: ${parsedTo.street1 || 'N/A'}`,
+    `City: ${parsedTo.city || 'N/A'}`,
+    `State: ${parsedTo.state || 'N/A'}`,
+    `ZIP: ${parsedTo.zip || 'N/A'}`,
     '',
     '*Parcel:*',
     `${shipment.parcels[0].length}" x ${shipment.parcels[0].width}" x ${shipment.parcels[0].height}" (${shipment.parcels[0].weight} lb)`
@@ -656,7 +695,7 @@ slackApp.view('returnlabel_edit_modal', async ({ ack, body, view, client, logger
           type: 'section',
           text: {
             type: 'mrkdwn',
-            text: 'Please review the details below. Click *Create Label* to generate the return label.'
+            text: 'Please review the parsed addresses and parcel details below. Click *Create Label* to generate the return label.'
           }
         },
         {
