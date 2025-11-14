@@ -661,7 +661,7 @@ const privateMetadata = JSON.stringify({
           { type: 'divider' },
 
           /* Shipping Service Mode */
-          {
+                    {
             type: 'section',
             block_id: 'service_mode_block',
             text: { type: 'mrkdwn', text: '*Shipping service*' },
@@ -683,6 +683,30 @@ const privateMetadata = JSON.stringify({
                 }
               ]
             }
+          },
+          {
+            type: 'input',
+            block_id: 'signature_block',
+            label: {
+              type: 'plain_text',
+              text: 'Signature requirement',
+              emoji: true
+            },
+            element: {
+              type: 'checkboxes',
+              action_id: 'signature_toggle',
+              options: [
+                {
+                  text: {
+                    type: 'plain_text',
+                    text: 'Check to NOT require signature (signature required by default)',
+                    emoji: true
+                  },
+                  value: 'no_signature'
+                }
+              ]
+            },
+            optional: true
           }
         ]
       }
@@ -774,6 +798,13 @@ const parcelWidth  = parcelModeResolved === 'default' ? DEFAULT_PARCEL.width  : 
 const parcelHeight = parcelModeResolved === 'default' ? DEFAULT_PARCEL.height : (parcelHeightRaw || DEFAULT_PARCEL.height);
 const parcelWeight = parcelModeResolved === 'default' ? DEFAULT_PARCEL.weight : (parcelWeightRaw || DEFAULT_PARCEL.weight);
 
+// Signature requirement:
+// - Default: require STANDARD signature
+// - If checkbox is checked → do NOT require signature (omit signature_confirmation)
+const signatureSelection =
+  values['signature_block']?.['signature_toggle']?.selected_options || [];
+const requireSignature = !Array.isArray(signatureSelection) || signatureSelection.length === 0;
+
   // Build shipment used for rating and (later) purchase
     const shipment = {
     address_from: {
@@ -812,6 +843,13 @@ const parcelWeight = parcelModeResolved === 'default' ? DEFAULT_PARCEL.weight : 
     ],
     async: false
   };
+
+  // Attach signature requirement to shipment.extra if needed
+  if (requireSignature) {
+    shipment.extra = {
+      signature_confirmation: 'STANDARD'
+    };
+  }
 
   // Service mode
   const serviceMode = values['service_mode_block']?.['service_mode']?.selected_option?.value || 'default';
