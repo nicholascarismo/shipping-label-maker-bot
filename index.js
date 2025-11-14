@@ -92,18 +92,25 @@ const DEFAULT_PARCEL = {
 };
 
 /**
- * Very simple US multi-line address parser.
- * Expects lines like:
- *   [0] Name
- *   [1] (optional) Company
- *   [2] Street
- *   [last] City, ST ZIP
+ * More flexible US multi-line address parser.
+ *
+ * Heuristics:
+ *  - Last line is assumed to be "City, ST ZIP" or "City ST ZIP".
+ *  - Among the remaining lines, the first line that "looks like a street"
+ *    (contains a digit or common street keyword) is treated as street1.
+ *  - Lines before street1:
+ *      - If street1 is at index 0 → no explicit name/company.
+ *      - If street1 is at index 1 → [0] is name, no company.
+ *      - If street1 is at index >= 2 → [0] is name, [1] is company.
+ *  - Lines between street1 and city/state/zip are joined into street2
+ *    (e.g., "Bsmt", "Apt 3B", "Suite 500").
  */
 function parseAddressMultiline(raw) {
   const empty = {
     name: '',
     company: '',
     street1: '',
+    street2: '',
     city: '',
     state: '',
     zip: ''
@@ -122,6 +129,7 @@ function parseAddressMultiline(raw) {
     return empty;
   }
 
+  // --- Parse city/state/zip from the last line ---
   const cityStateZipLine = lines[lines.length - 1];
   let city = '';
   let state = '';
@@ -149,37 +157,74 @@ function parseAddressMultiline(raw) {
     }
   }
 
+  // Everything before the last line is "head" (name/company/street)
+  const head = lines.slice(0, lines.length - 1);
+  if (head.length === 0) {
+    return {
+      ...empty,
+      city: city || '',
+      state: state || '',
+      zip: zip || ''
+    };
+  }
+
+  // Heuristic for "looks like a street" (digits or typical street words)
+  const streetKeywords = [
+    ' st', ' street',
+    ' ave', ' avenue',
+    ' blvd', ' boulevard',
+    ' rd', ' road',
+    ' dr', ' drive',
+    ' ln', ' lane',
+    ' ter', ' terrace',
+    ' way',
+    ' hwy', ' highway',
+    ' pkwy', ' parkway',
+    ' ct', ' court',
+    ' cir', ' circle',
+    ' pl', ' place'
+  ];
+
+  function looksLikeStreet(line) {
+    const lower = line.toLowerCase();
+    const hasDigit = /\d/.test(line);
+    if (hasDigit) return true;
+    return streetKeywords.some((kw) => lower.includes(kw));
+  }
+
+  let streetIndex = head.findIndex(looksLikeStreet);
+  if (streetIndex === -1) {
+    // No obvious street; assume last head line is street
+    streetIndex = head.length - 1;
+  }
+
+  // Decide name & company based on where the street starts
   let name = '';
   let company = '';
-  let street1 = '';
 
-  if (lines.length === 4) {
-    // 0: name, 1: company, 2: street, 3: city/state/zip
-    name = lines[0];
-    company = lines[1];
-    street1 = lines[2];
-  } else if (lines.length === 3) {
-    // 0: name, 1: street, 2: city/state/zip
-    name = lines[0];
+  if (streetIndex === 0) {
+    // No explicit name/company; only street-ish stuff
+    name = '';
     company = '';
-    street1 = lines[1];
-  } else if (lines.length >= 5) {
-    // 0: name, 1: company, 2: street, ... , last: city/state/zip
-    name = lines[0];
-    company = lines[1];
-    street1 = lines[2];
-  } else if (lines.length === 2) {
-    // 0: name, 1: something else
-    name = lines[0];
-    company = lines[1];
-  } else if (lines.length === 1) {
-    name = lines[0];
+  } else if (streetIndex === 1) {
+    // [0] is name, no company
+    name = head[0];
+    company = '';
+  } else {
+    // [0] is name, [1] is company
+    name = head[0];
+    company = head[1];
   }
+
+  const street1 = head[streetIndex] || '';
+  const extraStreetLines = head.slice(streetIndex + 1);
+  const street2 = extraStreetLines.length > 0 ? extraStreetLines.join(', ') : '';
 
   return {
     name: name || '',
     company: company || '',
     street1: street1 || '',
+    street2: street2 || '',
     city: city || '',
     state: state || '',
     zip: zip || ''
@@ -691,11 +736,12 @@ slackApp.view('returnlabel_edit_modal', async ({ ack, body, view, client, logger
   const parcelWeight = parcelMode === 'default' ? DEFAULT_PARCEL.weight : (parcelWeightRaw || DEFAULT_PARCEL.weight);
 
   // Build shipment used for rating and (later) purchase
-  const shipment = {
+    const shipment = {
     address_from: {
       name: parsedFrom.name || 'Carismo Design',
       company: parsedFrom.company || '',
       street1: parsedFrom.street1 || '71 Winant Place (Suite B)',
+      street2: parsedFrom.street2 || '',
       city: parsedFrom.city || 'Staten Island',
       state: parsedFrom.state || 'NY',
       zip: parsedFrom.zip || '10309',
@@ -707,6 +753,7 @@ slackApp.view('returnlabel_edit_modal', async ({ ack, body, view, client, logger
       name: parsedTo.name || 'Returns Department',
       company: parsedTo.company || 'Carismo Design',
       street1: parsedTo.street1 || '71 Winant Place (Suite B)',
+      street2: parsedTo.street2 || '',
       city: parsedTo.city || 'Staten Island',
       state: parsedTo.state || 'NY',
       zip: parsedTo.zip || '10309',
@@ -889,16 +936,16 @@ slackApp.view('returnlabel_edit_modal', async ({ ack, body, view, client, logger
     `Name: ${shipment.address_from.name || 'N/A'}`,
     `Company: ${shipment.address_from.company || 'N/A'}`,
     `Street: ${shipment.address_from.street1 || 'N/A'}`,
+    `Street 2: ${shipment.address_from.street2 || 'N/A'}`,
     `City: ${shipment.address_from.city || 'N/A'}`,
     `State: ${shipment.address_from.state || 'N/A'}`,
     `ZIP: ${shipment.address_from.zip || 'N/A'}`,
     '',
-    '*Ship To (raw):*',
-    '```', toRawText, '```',
     '*Ship To (parsed):*',
     `Name: ${shipment.address_to.name || 'N/A'}`,
     `Company: ${shipment.address_to.company || 'N/A'}`,
     `Street: ${shipment.address_to.street1 || 'N/A'}`,
+    `Street 2: ${shipment.address_to.street2 || 'N/A'}`,
     `City: ${shipment.address_to.city || 'N/A'}`,
     `State: ${shipment.address_to.state || 'N/A'}`,
     `ZIP: ${shipment.address_to.zip || 'N/A'}`,
