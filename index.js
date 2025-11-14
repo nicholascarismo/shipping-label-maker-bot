@@ -2167,7 +2167,7 @@ slackApp.view('shippinglabel_review_modal', async ({ ack, body, view, client, lo
 });
 
 /**
- * View submission handler for the "Review" modal.
+ * View submission handler for the "Review" modal (returnlabel).
  * If a selectedRate is present, buys that exact rate; else uses fallback createReturnLabelWithShippo.
  * Then downloads the PDF and uploads it to Slack with carrier/service/ETA.
  */
@@ -2176,7 +2176,7 @@ slackApp.view('returnlabel_review_modal', async ({ ack, body, view, client, logg
 
   const log = logger || console;
 
-    let channelId = null;
+  let channelId = null;
   let shipment = null;
   let selectedRate = null;
   let threadTs = null;
@@ -2232,6 +2232,7 @@ slackApp.view('returnlabel_review_modal', async ({ ack, body, view, client, logg
     return;
   }
 
+  // DM the user a Parcel reminder if we know who they are
   if (userIdForDm) {
     await sendParcelReminderDm(client, userIdForDm, shipment, trackingNumber, 'return');
   }
@@ -2241,6 +2242,7 @@ slackApp.view('returnlabel_review_modal', async ({ ack, body, view, client, logg
       ? `${etaDaysOut} business day${etaDaysOut === 1 ? '' : 's'} (estimated)`
       : 'N/A';
 
+  // Download the PDF
   let pdfBuffer;
   try {
     const pdfRes = await fetch(labelUrl);
@@ -2256,8 +2258,8 @@ slackApp.view('returnlabel_review_modal', async ({ ack, body, view, client, logg
     try {
       await client.chat.postMessage({
         channel: channelId,
-          text:
-          `<@${userIdFromMeta}> ✅ Created Shippo return label, but failed to download the PDF.\n` +
+        text:
+          `${userIdForDm ? `<@${userIdForDm}> ` : ''}✅ Created Shippo return label, but failed to download the PDF.\n` +
           `*Tracking number:* ${trackingNumber || 'N/A'}\n` +
           `*Carrier:* ${carrierOut || 'N/A'}\n` +
           `*Service:* ${serviceOut || 'N/A'}\n` +
@@ -2270,13 +2272,14 @@ slackApp.view('returnlabel_review_modal', async ({ ack, body, view, client, logg
     return;
   }
 
+  // Upload the PDF and tag the user in the thread
   try {
     await client.files.uploadV2({
       channel_id: channelId,
       filename: 'return-label.pdf',
       file: pdfBuffer,
-            initial_comment:
-        `<@${userIdFromMeta}> 📦 *Return label created*\n` +
+      initial_comment:
+        `${userIdForDm ? `<@${userIdForDm}> ` : ''}📦 *Return label created*\n` +
         `• *Tracking number:* ${trackingNumber || 'N/A'}\n` +
         `• *Carrier:* ${carrierOut || 'N/A'}\n` +
         `• *Service:* ${serviceOut || 'N/A'}\n` +
@@ -2289,8 +2292,8 @@ slackApp.view('returnlabel_review_modal', async ({ ack, body, view, client, logg
     try {
       await client.chat.postMessage({
         channel: channelId,
-                text:
-          `<@${userIdFromMeta}> ✅ Created Shippo return label, but failed to upload the PDF to Slack.\n` +
+        text:
+          `${userIdForDm ? `<@${userIdForDm}> ` : ''}✅ Created Shippo return label, but failed to upload the PDF to Slack.\n` +
           `*Tracking number:* ${trackingNumber || 'N/A'}\n` +
           `*Carrier:* ${carrierOut || 'N/A'}\n` +
           `*Service:* ${serviceOut || 'N/A'}\n` +
