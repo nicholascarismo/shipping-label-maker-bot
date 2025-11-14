@@ -1301,7 +1301,7 @@ slackApp.view('shippinglabel_edit_modal', async ({ ack, body, view, client, logg
       type: 'modal',
       callback_id: 'shippinglabel_review_modal',
       private_metadata: reviewMetadata,
-      title: { type: 'plain_text', text: 'Review Shipping Label Details', emoji: true },
+      title: { type: 'plain_text', text: 'Review Shipping Label', emoji: true },
       submit: { type: 'plain_text', text: 'Create Label', emoji: true },
       close:  { type: 'plain_text', text: 'Back', emoji: true },
             blocks: [
@@ -1871,8 +1871,8 @@ slackApp.action('service_option_select', async ({ ack, body, client, logger }) =
     flow === 'shippinglabel' ? 'shippinglabel_review_modal' : 'returnlabel_review_modal';
   const reviewTitleText =
     flow === 'shippinglabel'
-      ? 'Review Shipping Label Details'
-      : 'Review Return Label Details';
+      ? 'Review Shipping Label'
+      : 'Review Return Label';
 
   try {
     await client.views.open({
@@ -1881,7 +1881,7 @@ slackApp.action('service_option_select', async ({ ack, body, client, logger }) =
         type: 'modal',
         callback_id: reviewCallbackId,
         private_metadata: reviewMetadata,
-        title: { type: 'plain_text', text: reviewTitleText, emoji: true },
+        title: { type: 'plain_text', text: 'Review Return Label', emoji: true },
         submit: { type: 'plain_text', text: 'Create Label', emoji: true },
         close:  { type: 'plain_text', text: 'Cancel', emoji: true },
                 blocks: [
