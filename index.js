@@ -97,13 +97,17 @@ const DEFAULT_PARCEL = {
  * Heuristics:
  *  - Last line is assumed to be "City, ST ZIP" or "City ST ZIP".
  *  - Among the remaining lines, the first line that "looks like a street"
- *    (contains a digit or common street keyword) is treated as street1.
+ *    (contains a common street keyword, optionally with digits) is treated as street1.
  *  - Lines before street1:
  *      - If street1 is at index 0 → no explicit name/company.
  *      - If street1 is at index 1 → [0] is name, no company.
  *      - If street1 is at index >= 2 → [0] is name, [1] is company.
  *  - Lines between street1 and city/state/zip are joined into street2
  *    (e.g., "Bsmt", "Apt 3B", "Suite 500").
+ *
+ * This version avoids treating any line with a digit as a street; it requires
+ * a street keyword (St, Ave, Blvd, Rd, etc.), so company names like "127 Labs Inc"
+ * are not misclassified as street lines.
  */
 function parseAddressMultiline(raw) {
   const empty = {
@@ -168,7 +172,7 @@ function parseAddressMultiline(raw) {
     };
   }
 
-  // Heuristic for "looks like a street" (digits or typical street words)
+  // Heuristic for "looks like a street" (typical street words, maybe digits)
   const streetKeywords = [
     ' st', ' street',
     ' ave', ' avenue',
@@ -188,8 +192,16 @@ function parseAddressMultiline(raw) {
   function looksLikeStreet(line) {
     const lower = line.toLowerCase();
     const hasDigit = /\d/.test(line);
-    if (hasDigit) return true;
-    return streetKeywords.some((kw) => lower.includes(kw));
+    const hasStreetKeyword = streetKeywords.some((kw) => lower.includes(kw));
+
+    // Primary rule: must have a street keyword.
+    // - If it also has a digit → classic "123 Main St" style.
+    // - If no digit, but has street word → still acceptable (e.g., "Main Street").
+    if (hasStreetKeyword) return true;
+
+    // No street keyword → do NOT treat as street.
+    // This prevents "127 Labs Inc" from being misclassified.
+    return false;
   }
 
   let streetIndex = head.findIndex(looksLikeStreet);
